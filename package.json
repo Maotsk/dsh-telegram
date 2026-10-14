@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
-  "description": "Telegram remote-control surface for dsh sessions: whitelisted chats list, read, prompt, and stop dsh sessions through the host ApiProxy",
-  "version": "0.1.0-rc.11",
+  "description": "Telegram remote control for DSH sessions: bind, prompt, stream replies, answer agent questions",
+  "version": "0.1.0-rc.12",
   "publishConfig": {
     "access": "public"
   },
@@ -46,6 +46,7 @@
     "client": {
       "platform": "web",
       "inject": [
+        "@deepseek-ai/dsh-client-locale",
         "@deepseek-ai/dsh-client-ui-slots"
       ]
     }
