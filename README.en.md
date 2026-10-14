@@ -82,6 +82,28 @@ chmod 600 "$DSH_HOME/.env"
 lists your sessions and workspaces. A restart is only needed when the plugin package
 itself is updated — settings apply on the fly.
 
+### Upgrading from 0.1.0-rc.x (package rename)
+
+Before 0.2.0 the plugin installed under the upstream name
+`@deepseek-ai/dsh-host-telegram`. If it is already installed, change three places
+in the profile (`$DSH_HOME/profiles/<profile>/`):
+
+- the dependency key in `package.json`:
+  `"@maotsk/dsh-host-telegram": "github:Maotsk/dsh-telegram#v0.2.0"`;
+- the entry in `dsh.profile.bundles` — to `@maotsk/dsh-host-telegram`;
+- `name:` in the plugin row in `cordis.patch.yml` — to `@maotsk/dsh-host-telegram`.
+
+Then drop the old copy and install the new one:
+
+```bash
+rm -rf "$DSH_HOME/profiles/<profile>/node_modules/@deepseek-ai/dsh-host-telegram"
+dsh plugin --profile <profile> install
+```
+
+Restart DSH, hard-refresh the page, and everything is in place: the row id
+(`telegram`) and the saved settings — token, chats, proxy, language, keyboard —
+carry over, because they are keyed by the row id rather than the package name.
+
 ## ⚙️ Settings
 
 The plugin card lives at **Settings → Plugins → Telegram**:

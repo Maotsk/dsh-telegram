@@ -4,6 +4,6 @@
 # zh still carries the upstream 0.0.x text with a fork banner on top — update it
 # together with the other two when its body is brought to 0.2.x.
 # After editing any side, re-record the hashes: git hash-object <file>
-README.md: b7410ee81e360f4068b6e78eb18121139437d563
-README.en.md: 083cfebe7e741bae8f41f0f7ca7866ca12245330
-README.zh.md: e047b1b515816f339359118917ccaa58d291a2e8
+README.md: 6d1e4b8f2d587eeafe76409163d178309f6c7c65
+README.en.md: 0c19c183a8da6e36b1112409608d3757ab254bfd
+README.zh.md: 07b52b40a6e0302c381f5dd598ff2d3054a7df8f
