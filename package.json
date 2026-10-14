@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote control for DSH sessions: bind, prompt, stream replies, answer agent questions",
-  "version": "0.1.0-rc.13",
+  "version": "0.1.0-rc.14",
   "publishConfig": {
     "access": "public"
   },
@@ -34,7 +34,7 @@
     "cordis.patch.yml",
     "lib/types/**/*.d.ts",
     "README.md",
-    "README.ru.md",
+    "README.en.md",
     "README.zh.md",
     "FORK.md"
   ],

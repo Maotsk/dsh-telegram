@@ -8,7 +8,13 @@
 
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#许可证)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
-[![English](https://img.shields.io/badge/README-English-blue.svg)](README.md)
+
+[Русский](README.md) · [English](README.en.md) · **中文**
+
+> ⚠️ **分叉说明：** 本页是上游（DSH 0.0.x）版本的说明。本分支已适配 **DSH 0.2.x**，
+> 并新增了俄语界面、Web 设置卡片与更长的按钮标题；安装与设置请以
+> [README.md](README.md)（俄语）或 [README.en.md](README.en.md)（英语）为准，
+> 内部细节见 [FORK.md](FORK.md)。
 
 ---
 

@@ -1,7 +1,9 @@
-# Bilingual-pair consistency record (docs/i18n/README.md): the git blob hash of each
-# side as of the last confirmed-consistent state. Both languages carry equal authority;
-# after editing either side, bring the other along and re-record.
-# NOTE: this standalone repo maintains both READMEs locally (they extend the monorepo
-# originals with the Install/Demo sections); hashes below are this repos current state.
-README.md: db7677e9b39892ade4a06fdce492d66c27638ab0
-README.zh.md: e248c4ff0e594808f2266d6e69e104c9e9599517
+# Consistency record for the READMEs (git blob hashes of the current state).
+# This fork makes the Russian README the primary one (README.md, shown by default);
+# README.en.md and README.zh.md are the English and Chinese counterparts.
+# zh still carries the upstream 0.0.x text with a fork banner on top — update it
+# together with the other two when its body is brought to 0.2.x.
+# After editing any side, re-record the hashes: git hash-object <file>
+README.md: b7410ee81e360f4068b6e78eb18121139437d563
+README.en.md: 083cfebe7e741bae8f41f0f7ca7866ca12245330
+README.zh.md: e047b1b515816f339359118917ccaa58d291a2e8
