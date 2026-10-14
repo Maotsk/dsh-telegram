@@ -61,6 +61,14 @@ interface HostWorkspace {
   updatedAt?: string | number | Date
 }
 
+/** One raw session log event (0.2.x wire shape). */
+interface HostSessionEvent {
+  type?: string
+  seq?: number
+  time?: number
+  data?: unknown
+}
+
 interface SessionControllerLike {
   list(request: { cursor?: string }, signal: AbortSignal): Promise<{ items: readonly HostSessionSummary[] }>
   page(request: {
@@ -68,7 +76,11 @@ interface SessionControllerLike {
     throughSeq: number
     beforeSeq?: number
     maxMessages?: number
-  }, signal: AbortSignal): Promise<{ records: readonly { type: 'event'; event: unknown }[]; hasMore: boolean }>
+  }, signal: AbortSignal): Promise<{ records: readonly { type: 'event'; event: HostSessionEvent }[]; hasMore: boolean }>
+  /** Host-only log read; unlike `page` it needs no cursor. */
+  inspect(sessionId: string, signal?: AbortSignal): Promise<{ events?: readonly HostSessionEvent[] } | undefined>
+  /** Resume a cold session and hand back its live agent. */
+  resolveAgent(sessionId: string): Promise<{ agent?: unknown; error?: { message?: string } } | undefined>
   create(request: { workspaceId?: string; cwd?: string; agentPreset?: string }): Promise<{ sessionId: string }>
   prompt(request: {
     requestId: string
@@ -150,15 +162,36 @@ interface PendingQuestion {
 /** Fold a host exception into the RPC failure branch the console formats. */
 function failureOf(error: unknown): { code: string; message: string; details: unknown } {
   const candidate = error as { code?: unknown; message?: unknown; details?: unknown } | undefined
-  const code = typeof candidate?.code === 'string' && candidate.code !== ''
+  const raw = typeof candidate?.code === 'string' && candidate.code !== ''
     ? candidate.code
-    // The console matches a few legacy codes; map the 0.2.x spelling back.
     : 'gateway/internal'
   return {
-    code,
+    // The console matches legacy codes such as `agent-preset-locked`, while
+    // 0.2.x spells the same condition `agent-preset/locked`.
+    code: raw.replace(/\//g, '-'),
     message: candidate?.message === undefined ? String(error) : String(candidate.message),
     details: candidate?.details ?? {},
   }
+}
+
+/**
+ * Tail of a raw log covering at most `maxMessages` user/assistant messages —
+ * the message-aligned window `page` would have returned without a cursor.
+ * @param events - the whole log, oldest first.
+ * @param maxMessages - message budget; non-positive returns everything.
+ * @returns the tail slice, oldest first.
+ */
+function tailByMessages(events: readonly HostSessionEvent[], maxMessages: number): readonly HostSessionEvent[] {
+  if (maxMessages <= 0 || events.length === 0) return events
+  let seen = 0
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const type = events[index]?.type
+    if (type === 'user/message' || type === 'assistant/message') {
+      seen += 1
+      if (seen > maxMessages) return events.slice(index + 1)
+    }
+  }
+  return events
 }
 
 /** Map one host session row onto the ApiProxy summary shape. */
@@ -353,21 +386,52 @@ export function createHostApi(ctx: Context): HostApi {
         const { rpcId, payload } = request
         try {
           const controller = sessions()
-          const page = await controller.page({
-            address: { kind: 'session', sessionId: payload.sessionId },
-            throughSeq: -1,
-            ...(payload.maxMessages === undefined ? {} : { maxMessages: payload.maxMessages }),
-            ...(payload.beforeSeq === undefined ? {} : { beforeSeq: payload.beforeSeq }),
-          }, liveSignal())
+          // `page` is cursor-addressed: the projections baseline carries the log
+          // cursor, and `inspect` (host-only, cursor-free) is the fallback.
+          let cursor: number | undefined
           let projections: { values: Record<string, unknown> } | undefined
           try {
             const baseline = await controller.projections({ sessionId: payload.sessionId }, liveSignal())
-            if (baseline !== null) projections = { values: baseline.values }
+            if (baseline !== null) {
+              cursor = baseline.asOfSeq
+              projections = { values: baseline.values }
+            }
           } catch { /* projections are optional for todos */ }
-          const events: HistoryEntry[] = page.records
-            .filter(record => record?.type === 'event')
-            .map(record => ({ event: record.event as HistoryEntry['event'] }))
-          return ok(rpcId, { events, hasMore: page.hasMore, ...(projections === undefined ? {} : { projections }) })
+          let inspected: readonly HostSessionEvent[] | undefined
+          if (cursor === undefined) {
+            try {
+              inspected = (await controller.inspect(payload.sessionId, liveSignal()))?.events
+              const last = inspected?.[inspected.length - 1]
+              if (typeof last?.seq === 'number') cursor = last.seq
+            } catch { /* fall through to the raw tail */ }
+          }
+          if (cursor !== undefined) {
+            try {
+              const page = await controller.page({
+                address: { kind: 'session', sessionId: payload.sessionId },
+                throughSeq: cursor,
+                ...(payload.maxMessages === undefined ? {} : { maxMessages: payload.maxMessages }),
+                ...(payload.beforeSeq === undefined ? {} : { beforeSeq: payload.beforeSeq }),
+              }, liveSignal())
+              const events: HistoryEntry[] = page.records
+                .filter(record => record?.type === 'event')
+                .map(record => ({ event: record.event as HistoryEntry['event'] }))
+              if (events.length > 0) {
+                return ok(rpcId, { events, hasMore: page.hasMore, ...(projections === undefined ? {} : { projections }) })
+              }
+            } catch { /* fall back to the raw log tail below */ }
+          }
+          if (inspected === undefined) {
+            try {
+              inspected = (await controller.inspect(payload.sessionId, liveSignal()))?.events
+            } catch { inspected = undefined }
+          }
+          const tail = tailByMessages(inspected ?? [], payload.maxMessages ?? 20)
+          return ok(rpcId, {
+            events: tail.map(event => ({ event: event as HistoryEntry['event'] })),
+            hasMore: (inspected?.length ?? 0) > tail.length,
+            ...(projections === undefined ? {} : { projections }),
+          })
         } catch (error) {
           return fail(rpcId, error)
         }
@@ -538,10 +602,18 @@ export function createHostApi(ctx: Context): HostApi {
         const { rpcId, payload } = request
         try {
           const presets = get<AgentPresetsLike>('agentPresets')
-          const agents = get<AgentsLike>('agents')
-          if (presets === undefined || agents === undefined) throw new Error('dsh-messenger-telegram: agentPresets/agents are not mounted')
-          const agent = agents.get(String(payload.sessionId))
-          if (agent === undefined) throw new Error(`dsh-messenger-telegram: session "${payload.sessionId}" has no live agent`)
+          if (presets === undefined) throw new Error('dsh-messenger-telegram: agentPresets is not mounted')
+          const sessionId = String(payload.sessionId)
+          let agent = get<AgentsLike>('agents')?.get(sessionId)
+          if (agent === undefined) {
+            // A cold session has no live agent yet: resuming it is what the Web
+            // UI does before it recomposes the preset.
+            const resolved = await sessions().resolveAgent(sessionId)
+            if (resolved?.agent === undefined) {
+              throw new Error(resolved?.error?.message ?? `dsh-messenger-telegram: session "${sessionId}" has no live agent`)
+            }
+            agent = resolved.agent
+          }
           const selected = await presets.select(agent, payload.agentPreset)
           return ok(rpcId, { agentPreset: selected })
         } catch (error) {

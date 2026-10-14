@@ -19,7 +19,7 @@ telegram (@deepseek-ai/dsh-host-telegram): failed to import
 | `src/host-api.ts` | новый. Тот же `ApiProxy`, но поверх **in-process сервисов DSH 0.2.x** — тех же, которыми пользуется веб-интерфейс: `sessionController` (`list`, `page`, `create`, `prompt`, `cancel`, `fork`, `rename`, `modelCatalog`), `workspaceRegistry` / `workspaceController` (список, создание, архив), `agentDefaultModel` (глобальная модель), `agentPresets` + `agents` (пресеты), `settingsController` (прочие настройки). Плюс мост вопросов агента: `question/asked` и `question/decided` синтезируются из waterfall-события `user-questions/request`, ответ уходит либо в тот же waterfall (открытый вопрос), либо в `userQuestions.answer(agent, callId, …)` (просроченный вопрос). Реальная лента сессий (`ctx.on('session/event')`) прокидывается как есть. |
 | `src/index.ts` | `inject` вместо `['apiProxy']` — `HOST_API_SERVICES`; API строится через `createHostApi(apiCtx)`; события консоли берутся из `api.events`; удалён `installSettingsSection` (в 0.2.x его нет — конфигурация читается из строки плагина в `cordis.patch.yml` профиля). |
 | `src/console.ts`, `src/render.ts` | импорт типов переведён на локальный шим. |
-| `package.json` | версия `0.1.0-rc.6`, убраны несуществующие зависимости (`dsh-host-apiproxy`, `dsh-settings`), добавлены `build`-скрипт и `esbuild` в devDependencies. |
+| `package.json` | версия `0.1.0-rc.7`, убраны несуществующие зависимости (`dsh-host-apiproxy`, `dsh-settings`), добавлены `build`-скрипт и `esbuild` в devDependencies. |
 
 `lib/index.js` собран из этих исходников: `npm run build`
 (`esbuild --bundle --packages=external`).
@@ -53,6 +53,17 @@ telegram (@deepseek-ai/dsh-host-telegram): failed to import
 3. Перезапустить DSH. В логе должны появиться строки
    `telegram: configuring bot for N allowed chat ids` и
    `telegram: bot @<name> listening`.
+
+## Что проверено на живых данных
+
+Пробником на копии реального хранилища (отдельный DSH_HOME, бот выключен) проверено:
+список сессий с заголовками (25 шт.), 6 проектов с количеством сессий, каталог моделей,
+Пресеты: `standard` (по умолчанию), `ptc`, `minimal`, `cordis`. История берёт курсор
+из проекций (`asOfSeq`), окно ограничивается числом сообщений (20 сообщений ≈ 122 события);
+если проекций нет — резервный путь через `sessionController.inspect` с хвостом по сообщениям.
+Выбор пресета работает и на «холодной» сессии — через `sessionController.resolveAgent`.
+Коды ошибок хоста приводятся к старому формату, который матчит консоль:
+`workspace-invalid-path`, `session-not-found`, `gateway-bad-request`, `agent-preset-locked`.
 
 ## Отличия от апстрима
 
