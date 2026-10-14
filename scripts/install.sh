@@ -103,7 +103,7 @@ if [ -n "${DSH_HOME:-}" ] && [ -d "$DSH_HOME" ]; then
   mkdir -p "$(dirname "$PATCH")"
   touch "$PATCH"
   if ! grep -q "dsh-host-telegram" "$PATCH"; then
-    printf -- "# dsh-host-telegram 安装器生成\n- insert:\n    - id: telegram\n      name: '@deepseek-ai/dsh-host-telegram'\n      config:\n        botToken: !!js process.env.TELEGRAM_BOT_TOKEN\n        allowChatIds: []\n" >> "$PATCH"
+    printf -- "# dsh-host-telegram 安装器生成\n- insert:\n    - id: telegram\n      name: '@maotsk/dsh-host-telegram'\n      config:\n        botToken: !!js process.env.TELEGRAM_BOT_TOKEN\n        allowChatIds: []\n" >> "$PATCH"
     echo "==> 已写入挂载行: $PATCH (allowChatIds 请在 settings 里配置)"
   else
     echo "==> $PATCH 已含 telegram 挂载行, 跳过"

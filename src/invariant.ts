@@ -1,13 +1,13 @@
 /**
- * Package-owned invariant companion for `@deepseek-ai/dsh-host-telegram`.
- * @module @deepseek-ai/dsh-host-telegram/invariant
+ * Package-owned invariant companion for `@maotsk/dsh-host-telegram`.
+ * @module @maotsk/dsh-host-telegram/invariant
  */
 
 /* jscpd:ignore-start */
 import type { Context } from '@deepseek-ai/cordis'
 import type { InvariantInstaller } from '@deepseek-ai/dsh-invariants'
 
-const PACKAGE_NAME = '@deepseek-ai/dsh-host-telegram'
+const PACKAGE_NAME = '@maotsk/dsh-host-telegram'
 
 /** Cordis companion plugin name. */
 export const name = 'telegram-invariant'

@@ -108,7 +108,7 @@ dsh plugin --profile web add git+https://github.com/Kevin66Z0/dsh-telegram.git
 
 ```bash
 cd dsh-host-telegram && git pull && ./install.sh /path/to/deepseek-harness   # 更新
-# 或包方式：  dsh plugin --profile web update/remove @deepseek-ai/dsh-host-telegram
+# 或包方式：  dsh plugin --profile web update/remove @maotsk/dsh-host-telegram
 ```
 
 ## ⚙️ 配置

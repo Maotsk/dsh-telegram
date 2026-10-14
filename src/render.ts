@@ -3,7 +3,7 @@
  * turn outcomes, and Telegram-safe chunking. No I/O here — every function is
  * a deterministic projection of its inputs so the console logic stays testable
  * without a transport.
- * @module @deepseek-ai/dsh-host-telegram/render
+ * @module @maotsk/dsh-host-telegram/render
  */
 
 import type { AssistantMessage, ContentBlock, TokenUsage, UserMessage } from '@deepseek-ai/dsh-llm'

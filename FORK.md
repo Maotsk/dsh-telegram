@@ -1,14 +1,15 @@
 # Форк для DSH 0.2.x
 
-Это форк [Kevin66Z0/dsh-telegram](https://github.com/Kevin66Z0/dsh-telegram)
-(`@deepseek-ai/dsh-host-telegram`), адаптированный под **DSH 0.2.x**
+Это форк [Kevin66Z0/dsh-telegram](https://github.com/Kevin66Z0/dsh-telegram),
+адаптированный под **DSH 0.2.x** и публикуемый как **`@maotsk/dsh-host-telegram`**
+(в апстриме тот же плагин лежит под именем `@deepseek-ai/dsh-host-telegram`).
 (проверено на 0.2.0-rc.2). Апстрим написан под поколение DSH 0.0.x, где хост
 монтировал сервис `apiProxy` — в 0.2.x такого пакета и сервиса нет, поэтому
 апстрим-версия падала при загрузке:
 
 ```
 dsh: warning: 1 entry did not activate
-telegram (@deepseek-ai/dsh-host-telegram): failed to import
+telegram (@deepseek-ai/dsh-host-telegram): failed to import   # имя апстрима, до переименования форка
 ```
 
 ## Что изменено
@@ -39,7 +40,7 @@ telegram (@deepseek-ai/dsh-host-telegram): failed to import
    ```yaml
    - insert:
        - id: telegram
-         name: '@deepseek-ai/dsh-host-telegram'
+         name: '@maotsk/dsh-host-telegram'
          config:
            botToken: '123456:AA...'
            allowChatIds: [123456789]

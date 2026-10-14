@@ -23,7 +23,7 @@
  * The plugin registers no network listener: all traffic is outbound Telegram
  * API long polling, tunneled through {@link Config.proxy} (defaulting to the
  * process `ALL_PROXY`/`HTTPS_PROXY`).
- * @module @deepseek-ai/dsh-host-telegram
+ * @module @maotsk/dsh-host-telegram
  */
 
 import { randomUUID } from 'node:crypto'

@@ -61,7 +61,7 @@
 dsh plugin --profile web add github:Maotsk/dsh-telegram
 ```
 
-после чего перезапустить DSH. Строку бандла `@deepseek-ai/dsh-host-telegram`
+после чего перезапустить DSH. Строку бандла `@maotsk/dsh-host-telegram`
 менеджер плагинов добавляет в профиль сам; если её не окажется в
 `dsh.profile.bundles` (`$DSH_HOME/profiles/web/package.json`) — допишите вручную.
 

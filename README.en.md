@@ -65,7 +65,7 @@ repository is public, no keys required.
 dsh plugin --profile web add github:Maotsk/dsh-telegram
 ```
 
-then restart DSH. The plugin manager adds the `@deepseek-ai/dsh-host-telegram` bundle row
+then restart DSH. The plugin manager adds the `@maotsk/dsh-host-telegram` bundle row
 to the profile itself; if it is missing from `dsh.profile.bundles` in
 `$DSH_HOME/profiles/web/package.json`, add it by hand.
 

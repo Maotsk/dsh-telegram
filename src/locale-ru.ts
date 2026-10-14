@@ -11,7 +11,7 @@
  * Russian plurals through {@link plural}); everything else is a plain
  * phrase table, applied longest-first so longer sentences win over fragments.
  *
- * @module @deepseek-ai/dsh-host-telegram/locale-ru
+ * @module @maotsk/dsh-host-telegram/locale-ru
  */
 
 /** Locale of the chat surface. */

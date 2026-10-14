@@ -12,7 +12,7 @@
  * hides it on the server side and this route only reports whether it is set, so
  * an empty field on save keeps the running token.
  *
- * @module @deepseek-ai/dsh-host-telegram/config-route
+ * @module @maotsk/dsh-host-telegram/config-route
  */
 import type { Context } from '@deepseek-ai/cordis'
 

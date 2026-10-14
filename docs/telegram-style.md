@@ -1,6 +1,6 @@
 # Telegram style reference
 
-Read-this-first reference for any Telegram reply-format, keyboard, or message-formatting requirement on the `@deepseek-ai/dsh-host-telegram` surface. It maps the surface's own rendering code and links a local mirror of the official Bot API. Read both before editing `../src`.
+Read-this-first reference for any Telegram reply-format, keyboard, or message-formatting requirement on the `@maotsk/dsh-host-telegram` surface. It maps the surface's own rendering code and links a local mirror of the official Bot API. Read both before editing `../src`.
 
 ## The surface, mapped
 

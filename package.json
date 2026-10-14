@@ -1,13 +1,13 @@
 {
-  "name": "@deepseek-ai/dsh-host-telegram",
+  "name": "@maotsk/dsh-host-telegram",
   "description": "Telegram remote control for DSH sessions: bind, prompt, stream replies, answer agent questions",
-  "version": "0.1.0-rc.15",
+  "version": "0.2.0",
   "publishConfig": {
     "access": "public"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Kevin66Z0/dsh-telegram.git",
+    "url": "git+https://github.com/Maotsk/dsh-telegram.git",
     "directory": "."
   },
   "type": "module",

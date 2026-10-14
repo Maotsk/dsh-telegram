@@ -12,7 +12,7 @@
 # proxy 省略时回退 ALL_PROXY / HTTPS_PROXY 环境变量, 直连可达时无需配置。
 - insert:
     - id: telegram
-      name: '@deepseek-ai/dsh-host-telegram'
+      name: '@maotsk/dsh-host-telegram'
       config:
         botToken: !!js process.env.TELEGRAM_BOT_TOKEN
         allowChatIds: []

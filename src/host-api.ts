@@ -16,7 +16,7 @@
  * `events` mirrors the console's event surface: real `session/event` frames
  * plus synthesised `question/asked` / `question/decided` frames, because DSH
  * 0.2.x models agent questions as a projection rather than session events.
- * @module @deepseek-ai/dsh-host-telegram/host-api
+ * @module @maotsk/dsh-host-telegram/host-api
  */
 import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'

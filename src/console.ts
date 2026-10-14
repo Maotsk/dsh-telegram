@@ -4,7 +4,7 @@
  * session's events. Pure orchestration — I/O goes through the injected port
  * and transport, so unit tests drive the full flow without a live bot or
  * harness.
- * @module @deepseek-ai/dsh-host-telegram/console
+ * @module @maotsk/dsh-host-telegram/console
  */
 
 import { SessionId, type SessionEvent, type SessionId as SessionIdBrand, type TodoItem, type TurnEndReason } from '@deepseek-ai/dsh-session'
