@@ -38,6 +38,7 @@ import type { SessionEvent, SessionId, TodoItem } from '@deepseek-ai/dsh-session
 import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
 import { isVolatile, type Volatile } from '@deepseek-ai/cosmokit'
 import { createHostApi, HOST_API_SERVICES } from './host-api.ts'
+import { registerConfigRoute } from './config-route.ts'
 import { localize, localizeRows, type BotLocale } from './locale-ru.ts'
 import { TelegramConsole, type ConsoleTransport, type SessionConsolePort } from './console.ts'
 import { lastTodoWrite } from './render.ts'
@@ -621,6 +622,9 @@ export function apply(ctx: Context, config: Config): void {
     }
     const sweep = setInterval(reconcile, 5000)
     ctx.effect(() => () => clearInterval(sweep), 'telegram.settings-sweep')
+    // The Web UI card lives in the browser and cannot touch cordis services, so
+    // it reads and writes the same namespace through this host route.
+    registerConfigRoute(ctx, readConfig)
 
     ctx.effect(() => async () => {
       sessionGeneration += 1

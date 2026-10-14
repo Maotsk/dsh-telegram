@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote-control surface for dsh sessions: whitelisted chats list, read, prompt, and stop dsh sessions through the host ApiProxy",
-  "version": "0.1.0-rc.9",
+  "version": "0.1.0-rc.10",
   "publishConfig": {
     "access": "public"
   },
@@ -23,12 +23,14 @@
       "default": "./lib/invariant.js"
     },
     "./cordis.patch.yml": "./cordis.patch.yml",
+    "./client": "./lib/client.js",
     "./src/*": "./src/*",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
     "lib/invariant.js",
+    "lib/client.js",
     "cordis.patch.yml",
     "lib/types/**/*.d.ts",
     "README.md",
@@ -40,6 +42,12 @@
   "dsh": {
     "bundle": {
       "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-slots"
+      ]
     }
   },
   "scripts": {
