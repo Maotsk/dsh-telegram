@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote control for DSH sessions: bind, prompt, stream replies, answer agent questions",
-  "version": "0.1.0-rc.12",
+  "version": "0.1.0-rc.13",
   "publishConfig": {
     "access": "public"
   },
