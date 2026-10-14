@@ -36,7 +36,9 @@ import type { AgentPresetEntry, ApiProxy, ModelCatalogFailure, ModelProviderGrou
 import { RpcId } from './apiproxy-shim.ts'
 import type { SessionEvent, SessionId, TodoItem } from '@deepseek-ai/dsh-session'
 import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
+import { isVolatile, type Volatile } from '@deepseek-ai/cosmokit'
 import { createHostApi, HOST_API_SERVICES } from './host-api.ts'
+import { localize, localizeRows, type BotLocale } from './locale-ru.ts'
 import { TelegramConsole, type ConsoleTransport, type SessionConsolePort } from './console.ts'
 import { lastTodoWrite } from './render.ts'
 import type { AnswerButton } from './render.ts'
@@ -102,14 +104,61 @@ export interface Config {
    * api.telegram.org directly.
    */
   proxy?: string
+  /**
+   * Chat language of the bot surface: `ru` (default) or `zh`. Upstream ships
+   * Simplified-Chinese literals; this fork translates outgoing text.
+   */
+  locale?: string
+  /**
+   * Bottom reply-keyboard policy: `dismissible` (default — Telegram's own
+   * toggle hides it), `off` (the bot never installs one; navigation stays on
+   * inline buttons and typed commands) or `persistent` (upstream's sticky
+   * keyboard that always occupies the composer).
+   */
+  keyboard?: string
 }
 
 /** Schemastery configuration for the Telegram console consumer. */
 export const Config: z<Config> = z.object({
+  // Not volatile: the token stays in the profile patch (usually a
+  // `!!js process.env.TELEGRAM_BOT_TOKEN` expression) and out of the web form.
   botToken: z.string().required(),
-  allowChatIds: z.array(z.number()).required(),
-  proxy: z.string(),
+  allowChatIds: z.array(z.number()).required()
+    .description('Разрешённые чаты: id чатов, которым бот отвечает. Пустой список — бот отказывает всем')
+    .volatile(),
+  proxy: z.string()
+    .description('HTTP-прокси для Telegram (только CONNECT), например http://user:pass@host:1080. Пусто — берётся ALL_PROXY/HTTPS_PROXY или прямое подключение')
+    .volatile(),
+  locale: z.string()
+    .description('Язык интерфейса бота: ru (по умолчанию) или zh')
+    .volatile(),
+  keyboard: z.string()
+    .description('Нижняя клавиатура бота: dismissible — можно свернуть (по умолчанию), off — не показывать совсем, persistent — закреплена всегда')
+    .volatile(),
 })
+
+/** Chat locale of one configuration, defaulting to Russian. */
+function resolveLocale(config: Config): BotLocale {
+  return config.locale === 'zh' ? 'zh' : 'ru'
+}
+
+/** Bottom reply-keyboard policy of one configuration. */
+function resolveKeyboard(config: Config): 'dismissible' | 'off' | 'persistent' {
+  if (config.keyboard === 'off') return 'off'
+  if (config.keyboard === 'persistent') return 'persistent'
+  return 'dismissible'
+}
+
+/**
+ * Read one schema field: a `.volatile()` field arrives as a live handle whose
+ * `get()` always reflects the settings page's latest committed value, while an
+ * ordinary field arrives as the plain value.
+ * @param field - the config field as the loader handed it over.
+ * @returns the current plain value.
+ */
+function plainValue<T>(field: T | Volatile<T>): T {
+  return isVolatile(field) ? (field as Volatile<T>).get() as T : field as T
+}
 
 /** Cordis function-plugin name. */
 export const name = 'telegram'
@@ -308,14 +357,17 @@ const PRESET_COMMAND_SCOPES = [
  * @param bot - the grammY client.
  * @param logger - the plugin logger.
  */
-function syncCommandMenu(bot: Bot, logger: Context['logger']): void {
+function syncCommandMenu(bot: Bot, logger: Context['logger'], locale: BotLocale): void {
   void (async () => {
     for (const scope of PRESET_COMMAND_SCOPES) {
       await bot.api.deleteMyCommands({ scope }).catch((error: unknown) => {
         logger.warn(`telegram: stale menu scope teardown failed for ${scope.type}: ${String(error)}`)
       })
     }
-    await bot.api.setMyCommands(COMMANDS).catch((error: unknown) => {
+    await bot.api.setMyCommands(COMMANDS.map(command => ({
+      command: command.command,
+      description: localize(command.description ?? '', locale),
+    }))).catch((error: unknown) => {
       logger.warn(`telegram: command menu registration failed: ${String(error)}`)
     })
   })()
@@ -345,6 +397,10 @@ export function startBotSession(options: {
   const { config, api, events, logger, onListened } = options
   const allowed = new Set(config.allowChatIds)
   const proxy = resolveProxy(config)
+  // Upstream ships Chinese literals; the chat surface is translated on the way
+  // out so the console logic stays untouched and `callback_data` never changes.
+  const locale = resolveLocale(config)
+  const keyboard = resolveKeyboard(config)
   // grammY's Node runner fetches through its own node-fetch-compatible
   // request layer, which ignores undici's `dispatcher` init field; a custom
   // fetch routes every Telegram API call through the CONNECT proxy instead.
@@ -355,50 +411,57 @@ export function startBotSession(options: {
   })
   const transport: ConsoleTransport = {
     sendMessage: async (chatId, text) => {
-      const message = await bot.api.sendMessage(chatId, text)
+      const message = await bot.api.sendMessage(chatId, localize(text, locale))
       return message.message_id
     },
     editMessage: async (chatId, messageId, text) => {
-      await bot.api.editMessageText(chatId, messageId, text)
+      await bot.api.editMessageText(chatId, messageId, localize(text, locale))
     },
     sendMessageHtml: async (chatId, html) => {
-      const message = await bot.api.sendMessage(chatId, html, { parse_mode: 'HTML' })
+      const message = await bot.api.sendMessage(chatId, localize(html, locale), { parse_mode: 'HTML' })
       return message.message_id
     },
     editMessageHtml: async (chatId, messageId, html) => {
-      await bot.api.editMessageText(chatId, messageId, html, { parse_mode: 'HTML' })
+      await bot.api.editMessageText(chatId, messageId, localize(html, locale), { parse_mode: 'HTML' })
     },
     sendChatAction: async (chatId, action) => {
       await bot.api.sendChatAction(chatId, action)
     },
     sendReplyKeyboard: async (chatId, text, rows) => {
-      const sent = await bot.api.sendMessage(chatId, text, {
+      const translated = localize(text, locale)
+      if (keyboard === 'off') {
+        // `off`: no composer-occupying keyboard; the list text and the inline
+        // buttons still carry every action.
+        const plain = await bot.api.sendMessage(chatId, translated)
+        return plain.message_id
+      }
+      const sent = await bot.api.sendMessage(chatId, translated, {
         reply_markup: {
-          keyboard: rows.map(row => row.map(text => ({ text }))),
+          keyboard: rows.map(row => row.map(label => ({ text: localize(label, locale) }))),
           resize_keyboard: true,
-          // Persist across the user's own messages, so the session buttons
-          // stay tappable through prompts until a command replaces them.
-          is_persistent: true,
-          input_field_placeholder: '向 agent 发消息，或 /start 查看命令',
+          // `dismissible` leaves Telegram's own hide toggle available;
+          // `persistent` is upstream's always-there keyboard.
+          is_persistent: keyboard === 'persistent',
+          input_field_placeholder: localize('向 agent 发消息，或 /start 查看命令', locale),
         },
       })
       return sent.message_id
     },
     removeKeyboard: async (chatId, text) => {
-      const sent = await bot.api.sendMessage(chatId, text, {
+      const sent = await bot.api.sendMessage(chatId, localize(text, locale), {
         reply_markup: { remove_keyboard: true },
       })
       return sent.message_id
     },
     sendInlineKeyboard: async (chatId, text, rows) => {
-      const sent = await bot.api.sendMessage(chatId, text, {
-        reply_markup: { inline_keyboard: inlineKeyboardMarkup(rows) },
+      const sent = await bot.api.sendMessage(chatId, localize(text, locale), {
+        reply_markup: { inline_keyboard: inlineKeyboardMarkup(localizeRows(rows, locale)) },
       })
       return sent.message_id
     },
     editInlineKeyboard: async (chatId, messageId, text, rows) => {
-      await bot.api.editMessageText(chatId, messageId, text, {
-        reply_markup: { inline_keyboard: inlineKeyboardMarkup(rows) },
+      await bot.api.editMessageText(chatId, messageId, localize(text, locale), {
+        reply_markup: { inline_keyboard: inlineKeyboardMarkup(localizeRows(rows, locale)) },
       })
     },
   }
@@ -410,7 +473,7 @@ export function startBotSession(options: {
       logger.warn(`telegram: chat ${chatId} refused: not in allowChatIds`)
       // The reply carries the caller's own chat id so the operator can paste
       // it straight into the allowlist; nothing else about the surface leaks.
-      void bot.api.sendMessage(chatId, `${DENIED_REPLY} 如需访问，请将 chat id ${chatId} 加入 allowChatIds 白名单。`).catch((error: unknown) => {
+      void bot.api.sendMessage(chatId, localize(`${DENIED_REPLY} 如需访问，请将 chat id ${chatId} 加入 allowChatIds 白名单。`, locale)).catch((error: unknown) => {
         logger.debug(`telegram: denial reply failed: ${String(error)}`)
       })
       return
@@ -450,7 +513,7 @@ export function startBotSession(options: {
   let stopped = false
   void bot.start({
     onStart: (botInfo) => {
-      syncCommandMenu(bot, logger)
+      syncCommandMenu(bot, logger, locale)
       onListened(config, botInfo.username)
     },
   })
@@ -478,7 +541,19 @@ export function startBotSession(options: {
  * @param config - validated plugin configuration (the settings base layer).
  */
 export function apply(ctx: Context, config: Config): void {
-  console.log(`telegram: configuring bot for ${config.allowChatIds.length} allowed chat ids`)
+  /**
+   * Effective configuration: the volatile schema fields arrive as live handles
+   * whose `get()` already reflects the settings page's latest committed value.
+   */
+  const readConfig = (): Config => ({
+    botToken: plainValue(config.botToken),
+    allowChatIds: plainValue(config.allowChatIds) ?? [],
+    proxy: plainValue(config.proxy) ?? '',
+    locale: plainValue(config.locale),
+    keyboard: plainValue(config.keyboard),
+  })
+  const initial = readConfig()
+  console.log(`telegram: configuring bot for ${initial.allowChatIds.length} allowed chat ids`)
   ctx.inject([...HOST_API_SERVICES], (apiCtx) => {
     const api = createHostApi(apiCtx)
     const logger = ctx.logger
@@ -504,16 +579,40 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
-    // DSH 0.2.x mounts no `installSettingsSection`, so the plugin row in the
-    // profile patch stays the single source of truth for the token, the chat
-    // allowlist and the proxy. The loader re-applies profile config on change,
-    // which rebuilds this plugin and therefore the bot session.
-    void TELEGRAM_SETTINGS_NAMESPACE
+    // The web settings page: DSH 0.2.x projects a profile entry into a live
+    // form when its Config marks fields `.volatile()`. `allowChatIds`, `proxy`,
+    // `locale` and `keyboard` are marked, so Настройки → Плагины shows them;
+    // the handles above carry a committed edit straight into `readConfig()`,
+    // and the events plus a slow sweep rebuild the bot session on a change.
+    let current = initial
+    const reconcile = (): void => {
+      try {
+        const next = readConfig()
+        if (JSON.stringify(next) === JSON.stringify(current)) return
+        current = next
+        console.log(`telegram: applying settings (${next.allowChatIds.length} allowed chat ids, locale ${resolveLocale(next)}, keyboard ${resolveKeyboard(next)})`)
+        startSession(next)
+      } catch (error) {
+        logger.warn?.(`telegram: settings apply failed: ${String(error)}`)
+      }
+    }
+    ctx.inject(['settings'], (settingsCtx) => {
+      const stop = settingsCtx.on('settings/document-updated', (ns: unknown) => {
+        if (ns === TELEGRAM_SETTINGS_NAMESPACE) reconcile()
+      })
+      settingsCtx.effect(() => stop, 'telegram.settings')
+    })
+    for (const event of ['loader/volatile-update', 'app-boot/config-reload'] as const) {
+      const stopEvent = ctx.on(event, () => reconcile())
+      ctx.effect(() => stopEvent, `telegram.${event}`)
+    }
+    const sweep = setInterval(reconcile, 5000)
+    ctx.effect(() => () => clearInterval(sweep), 'telegram.settings-sweep')
 
     ctx.effect(() => async () => {
       sessionGeneration += 1
       await session?.stop()
     }, 'telegram.lifecycle()')
-    startSession(config)
+    startSession(current)
   })
 }

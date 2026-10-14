@@ -9,7 +9,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
   CREATE_UNGROUPED_LABEL, KEYBOARD_ACTION_ROWS, PRESET_KEYBOARD_MAX, QUEUE_ACK_MAX,
   SESSION_KEYBOARD_MAX, SESSION_STATE_LEGEND, SESSION_TITLE_MAX, STATUS_MAIN_MAX, STREAM_REPLYING_SUFFIX,
-  REASONING_BRIEF_MAX, TELEGRAM_CHUNK_MAX, TELEGRAM_VERSION, TOOL_ARGS_MAX, WORKSPACE_KEYBOARD_MAX,
+  REASONING_BRIEF_MAX, TELEGRAM_BUTTON_MAX, TELEGRAM_CHUNK_MAX, TELEGRAM_VERSION, TOOL_ARGS_MAX, WORKSPACE_KEYBOARD_MAX,
   accumulateRoundUsage, actionsHtml, assistantMessageText, assistantTail, attachScopeButtons, attachSessionButtons,
   lastTurnUsage, latestTurnStartTime, openTurnUsage,
   attachSessionData, blockText, chunkText, compactTokenCount,
@@ -872,7 +872,7 @@ describe('keyboard button budget', () => {
     }
   })
 
-  it('keeps every workspace button at or below 20 code points at the two-digit index', () => {
+  it('keeps every workspace button inside the Telegram label limit at the two-digit index', () => {
     const items = Array.from({ length: WORKSPACE_KEYBOARD_MAX }, (_, index) => ({
       workspaceId: `ws-${index}` as WorkspaceView['workspaceId'],
       title: `很长很长的工作区标题${index}`,
@@ -883,9 +883,15 @@ describe('keyboard button budget', () => {
     }))
     for (const row of workspaceKeyboardRows(items)) {
       for (const button of row) {
-        expect(Array.from(button).length, button).toBeLessThanOrEqual(20)
+        expect(Array.from(button).length, button).toBeLessThanOrEqual(TELEGRAM_BUTTON_MAX)
       }
     }
+  })
+
+  it('shows a workspace name in full while it fits the button limit', () => {
+    const title = 'dsh-messenger-gateway'
+    const rows = workspaceKeyboardRows([workspaceRowItem({ workspaceId: 'ws-1', title })])
+    expect(rows[1]).toEqual([`/new 1 · ${title}`])
   })
 })
 
@@ -946,11 +952,14 @@ describe('presetKeyboardRows', () => {
     ])
   })
 
-  it('caps the buttons and truncates long display names', () => {
+  it('keeps a display name in full and truncates only past the Telegram label limit', () => {
     const items = Array.from({ length: 20 }, (_, index) => entry(`p${index}`, `很长很长的模式名${index}`))
     const rows = presetKeyboardRows(items)
     expect(rows.length).toBe(PRESET_KEYBOARD_MAX + 2)
-    expect(rows[2]?.[0]).toContain('…')
+    expect(rows[2]?.[0]).not.toContain('…')
+    const overlong = presetKeyboardRows([entry('p0', 'x'.repeat(120))])
+    expect(overlong[2]?.[0]).toContain('…')
+    expect(Array.from(overlong[2]?.[0] ?? '').length).toBeLessThanOrEqual(TELEGRAM_BUTTON_MAX)
   })
 })
 

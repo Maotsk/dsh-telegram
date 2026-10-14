@@ -23,7 +23,7 @@ export const TELEGRAM_CHUNK_MAX = 3500
 /** Queued-prompt acknowledgement caps the echoed text at this many code points. */
 export const QUEUE_ACK_MAX = 200
 /** Row-title truncation for workspace and todo rows. */
-export const SESSION_TITLE_MAX = 48
+export const SESSION_TITLE_MAX = 80
 /** Tool-call argument-brief truncation. */
 export const TOOL_ARGS_MAX = 80
 /** Reasoning (Think) brief truncation in code points. */
@@ -34,20 +34,21 @@ export const HISTORY_DEFAULT_LIMIT = 20
 export const STATUS_MAIN_MAX = 400
 /** Reply-keyboard sessions capped at the rows a bot can usefully show. */
 export const SESSION_KEYBOARD_MAX = 15
+/** Telegram rejects a button label longer than 64 characters; keep a margin. */
+export const TELEGRAM_BUTTON_MAX = 60
 /**
- * Title inside a workspace or preset button; the worst-case button
- * (`/attach <n> · <title>…` or `/preset <n> · <name>…`) stays within 20 code
- * points, so the button holds one line on the narrowest phones that render
- * the reply keyboard.
+ * Cap a button label's variable part so the whole label stays inside
+ * Telegram's button limit. Names ride along in full until that ceiling, so a
+ * workspace or preset is recognisable from its button.
+ * @param text - the variable part (a title or a preset name).
+ * @param fixedLength - code points the label spends on glyphs and commands.
+ * @returns the text, truncated only when the label would not fit.
  */
-export const SESSION_KEYBOARD_TITLE_MAX = 6
+export function fitButtonText(text: string, fixedLength: number): string {
+  return truncate(text, Math.max(1, TELEGRAM_BUTTON_MAX - fixedLength))
+}
 /** Reply-keyboard workspaces capped like the session rows. */
 export const WORKSPACE_KEYBOARD_MAX = 15
-/**
- * Title inside a workspace button; worst case (`/new <n> · <title>…`) fits one
- * line like the session buttons.
- */
-export const WORKSPACE_KEYBOARD_TITLE_MAX = 8
 /** The reply-keyboard label that creates an ungrouped (no-workspace) session. */
 export const CREATE_UNGROUPED_LABEL = '/new none · 未分类'
 /**
@@ -749,7 +750,7 @@ export function sessionKeyboardRows(items: readonly SessionSummary[], verb: stri
   const rows: string[][] = [...KEYBOARD_ACTION_ROWS.map(row => [...row])]
   for (const [index, item] of items.slice(0, SESSION_KEYBOARD_MAX).entries()) {
     const title = item.projections?.values.title ?? item.cwd ?? shortSessionId(item.sessionId)
-    rows.push([`/${verb} ${index + 1} · ${sessionGlyph(item)} ${title}`])
+    rows.push([`/${verb} ${index + 1} · ${sessionGlyph(item)} ${fitButtonText(title, `/${verb} ${index + 1} · ${sessionGlyph(item)} `.length)}`])
   }
   return rows
 }
@@ -796,7 +797,7 @@ export function workspaceRow(index: number, workspace: WorkspaceView): string {
 export function workspaceKeyboardRows(workspaces: readonly WorkspaceView[]): string[][] {
   const rows: string[][] = [...KEYBOARD_ACTION_ROWS.map(row => [...row])]
   for (const [index, workspace] of workspaces.slice(0, WORKSPACE_KEYBOARD_MAX).entries()) {
-    rows.push([`/new ${index + 1} · ${truncate(workspace.title, WORKSPACE_KEYBOARD_TITLE_MAX)}`])
+    rows.push([`/new ${index + 1} · ${fitButtonText(workspace.title, `/new ${index + 1} · `.length)}`])
   }
   rows.push([CREATE_UNGROUPED_LABEL])
   return rows
@@ -850,7 +851,7 @@ export function presetKeyboardRows(presets: readonly AgentPresetEntry[]): string
   const rows: string[][] = [...KEYBOARD_ACTION_ROWS.map(row => [...row])]
   for (const [index, preset] of presets.slice(0, PRESET_KEYBOARD_MAX).entries()) {
     const label = preset.name ?? preset.id
-    rows.push([`/preset ${index + 1} · ${truncate(label, SESSION_KEYBOARD_TITLE_MAX)}`])
+    rows.push([`/preset ${index + 1} · ${fitButtonText(label, `/preset ${index + 1} · `.length)}`])
   }
   return rows
 }
@@ -925,7 +926,7 @@ export function attachScopeButtons(
 ): AnswerButton[][] {
   const rows: AnswerButton[][] = []
   for (const workspace of workspaces.slice(0, WORKSPACE_KEYBOARD_MAX)) {
-    rows.push([{ text: `📁 ${truncate(workspace.title, SESSION_KEYBOARD_TITLE_MAX)}`, data: attachWorkspaceData(workspace.workspaceId) }])
+    rows.push([{ text: `📁 ${fitButtonText(workspace.title, 3)}`, data: attachWorkspaceData(workspace.workspaceId) }])
   }
   if (options.ungrouped) rows.push([{ text: '未分组', data: ATTACH_UNGROUPED_DATA }])
   if (options.archived) rows.push([{ text: '归档', data: ATTACH_ARCHIVED_DATA }])
@@ -942,7 +943,7 @@ export function attachSessionButtons(items: readonly SessionSummary[]): AnswerBu
   const rows: AnswerButton[][] = []
   for (const item of items.slice(0, SESSION_KEYBOARD_MAX)) {
     const title = item.projections?.values.title ?? item.cwd ?? shortSessionId(item.sessionId)
-    rows.push([{ text: `${sessionGlyph(item)} ${title}`, data: attachSessionData(item.sessionId) }])
+    rows.push([{ text: `${sessionGlyph(item)} ${fitButtonText(title, `${sessionGlyph(item)} `.length)}`, data: attachSessionData(item.sessionId) }])
   }
   return rows
 }
@@ -997,7 +998,7 @@ export function sessionActionButtons(items: readonly SessionSummary[], verb: 'st
   for (const item of items.slice(0, SESSION_KEYBOARD_MAX)) {
     const title = item.projections?.values.title ?? item.cwd ?? shortSessionId(item.sessionId)
     const glyph = verb === 'stop' ? '⏹' : '📊'
-    rows.push([{ text: `${glyph} ${sessionGlyph(item)} ${title}`, data: verb === 'stop' ? sessionStopData(item.sessionId) : sessionStatusData(item.sessionId) }])
+    rows.push([{ text: `${glyph} ${sessionGlyph(item)} ${fitButtonText(title, `${glyph} ${sessionGlyph(item)} `.length)}`, data: verb === 'stop' ? sessionStopData(item.sessionId) : sessionStatusData(item.sessionId) }])
   }
   return rows
 }
