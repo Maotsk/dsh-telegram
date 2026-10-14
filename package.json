@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote-control surface for dsh sessions: whitelisted chats list, read, prompt, and stop dsh sessions through the host ApiProxy",
-  "version": "0.1.0-rc.5",
+  "version": "0.1.0-rc.6",
   "publishConfig": {
     "access": "public"
   },
@@ -41,7 +41,11 @@
     }
   },
   "scripts": {
-    "sync": "bash scripts/sync-from-monorepo.sh"
+    "sync": "bash scripts/sync-from-monorepo.sh",
+    "build": "esbuild src/index.ts src/invariant.ts --bundle --format=esm --platform=node --target=es2022 --packages=external --outdir=lib"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
   },
   "dependencies": {
     "grammy": "^1.29.0",
@@ -52,11 +56,9 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "*",
-    "@deepseek-ai/dsh-host-apiproxy": "*",
     "@deepseek-ai/dsh-invariants": "*",
     "@deepseek-ai/dsh-llm": "*",
     "@deepseek-ai/dsh-session": "*",
-    "@deepseek-ai/dsh-settings": "*",
     "@deepseek-ai/dsh-user-questions": "*",
     "@deepseek-ai/schemastery": "*"
   },

@@ -8,7 +8,7 @@
  */
 
 import { SessionId, type SessionEvent, type SessionId as SessionIdBrand, type TodoItem, type TurnEndReason } from '@deepseek-ai/dsh-session'
-import type { AgentPresetEntry, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
+import type { AgentPresetEntry, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import {
   ASSISTANT_ROLE_GLYPH, HISTORY_DEFAULT_LIMIT, KEYBOARD_ACTION_ROWS,

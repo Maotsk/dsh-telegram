@@ -32,11 +32,11 @@ import z from '@deepseek-ai/schemastery'
 import { Bot } from 'grammy'
 import type { BotCommand, BotCommandScope } from 'grammy/types'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
-import type { AgentPresetEntry, ApiProxy, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
-import { RpcId } from '@deepseek-ai/dsh-host-apiproxy'
+import type { AgentPresetEntry, ApiProxy, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
+import { RpcId } from './apiproxy-shim.ts'
 import type { SessionEvent, SessionId, TodoItem } from '@deepseek-ai/dsh-session'
 import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
-import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
+import { createHostApi, HOST_API_SERVICES } from './host-api.ts'
 import { TelegramConsole, type ConsoleTransport, type SessionConsolePort } from './console.ts'
 import { lastTodoWrite } from './render.ts'
 import type { AnswerButton } from './render.ts'
@@ -75,7 +75,7 @@ export const COMMANDS: BotCommand[] = [
 ]
 
 /** The settings namespace this surface edits (model-visible from the settings pages). */
-export const TELEGRAM_SETTINGS_NAMESPACE = settingsNamespace('telegram')
+export const TELEGRAM_SETTINGS_NAMESPACE = 'telegram'
 
 /**
  * The settings section the harness reads the global default model selection
@@ -84,7 +84,7 @@ export const TELEGRAM_SETTINGS_NAMESPACE = settingsNamespace('telegram')
  * registers — so a write here is what new sessions and sessions whose own log
  * names no selection start from.
  */
-export const GLOBAL_DEFAULT_MODEL_NAMESPACE = settingsNamespace('agent-default-model')
+export const GLOBAL_DEFAULT_MODEL_NAMESPACE = 'agent-default-model'
 
 /** Telegram remote-control plugin configuration. */
 export interface Config {
@@ -114,7 +114,7 @@ export const Config: z<Config> = z.object({
 /** Cordis function-plugin name. */
 export const name = 'telegram'
 /** Services required before the console can drive sessions. */
-export const inject = ['apiProxy']
+export const inject = HOST_API_SERVICES
 
 /** The proxy this deployment uses, or undefined for a direct connection. */
 function resolveProxy(config: Config): string | undefined {
@@ -479,7 +479,8 @@ export function startBotSession(options: {
  */
 export function apply(ctx: Context, config: Config): void {
   console.log(`telegram: configuring bot for ${config.allowChatIds.length} allowed chat ids`)
-  ctx.inject(['apiProxy'], (apiCtx) => {
+  ctx.inject([...HOST_API_SERVICES], (apiCtx) => {
+    const api = createHostApi(apiCtx)
     const logger = ctx.logger
     let session: BotSession | undefined
     let sessionGeneration = 0
@@ -490,8 +491,8 @@ export function apply(ctx: Context, config: Config): void {
         if (generation !== sessionGeneration) return
         session = startBotSession({
           config: cfg,
-          api: apiCtx.apiProxy,
-          events: apiCtx,
+          api,
+          events: api.events as unknown as Context,
           logger,
           onListened: (current, username) => {
             console.log(`telegram: bot @${username} listening`)
@@ -503,22 +504,11 @@ export function apply(ctx: Context, config: Config): void {
       })
     }
 
-    // The settings seam: registered as the `telegram` namespace with the
-    // composition entry as base; a committed edit re-runs the session.
-    const reconciler = (): void => {
-      const next = configSource()
-      if (JSON.stringify(next) === JSON.stringify(config)) return
-      config = next
-      console.log(`telegram: reconfiguring bot for ${next.allowChatIds.length} allowed chat ids`)
-      startSession(next)
-    }
-    let configSource: () => Config = () => config
-    installSettingsSection(ctx, TELEGRAM_SETTINGS_NAMESPACE, Config, config, {
-      setSource: (current) => {
-        configSource = current
-      },
-      onChange: reconciler,
-    })
+    // DSH 0.2.x mounts no `installSettingsSection`, so the plugin row in the
+    // profile patch stays the single source of truth for the token, the chat
+    // allowlist and the proxy. The loader re-applies profile config on change,
+    // which rebuilds this plugin and therefore the bot session.
+    void TELEGRAM_SETTINGS_NAMESPACE
 
     ctx.effect(() => async () => {
       sessionGeneration += 1

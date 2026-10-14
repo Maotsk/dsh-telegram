@@ -8,7 +8,7 @@
 
 import type { AssistantMessage, ContentBlock, TokenUsage, UserMessage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent, type TodoItem, type TurnEndReason } from '@deepseek-ai/dsh-session'
-import type { AgentPresetEntry, SessionSummary, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
+import type { AgentPresetEntry, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
 import type { AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 
 /**
