@@ -45,7 +45,9 @@ export const TELEGRAM_BUTTON_MAX = 60
  * @returns the text, truncated only when the label would not fit.
  */
 export function fitButtonText(text: string, fixedLength: number): string {
-  return truncate(text, Math.max(1, TELEGRAM_BUTTON_MAX - fixedLength))
+  const budget = Math.max(1, TELEGRAM_BUTTON_MAX - fixedLength)
+  // `truncate` appends an ellipsis beyond its cap, so leave a code point for it.
+  return Array.from(text).length > budget ? truncate(text, budget - 1) : text
 }
 /** Reply-keyboard workspaces capped like the session rows. */
 export const WORKSPACE_KEYBOARD_MAX = 15

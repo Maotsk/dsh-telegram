@@ -5,8 +5,8 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
-import { RpcId } from '@deepseek-ai/dsh-host-apiproxy'
-import type { ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
+import { RpcId } from '../src/apiproxy-shim.ts'
+import type { ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceView } from '../src/apiproxy-shim.ts'
 import type { TokenUsage, UserMessage } from '@deepseek-ai/dsh-llm'
 import { ATTACH_READ_LIMIT, MODEL_KEYBOARD_LIMIT, TURN_ERROR_REASON_MAX, TelegramConsole, interpretInput } from '../src/console.ts'
 import type { ConsoleTransport, SessionConsolePort } from '../src/console.ts'

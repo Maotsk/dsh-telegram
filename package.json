@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote control for DSH sessions: bind, prompt, stream replies, answer agent questions",
-  "version": "0.1.0-rc.14",
+  "version": "0.1.0-rc.15",
   "publishConfig": {
     "access": "public"
   },
@@ -36,7 +36,8 @@
     "README.md",
     "README.en.md",
     "README.zh.md",
-    "FORK.md"
+    "FORK.md",
+    "CHANGELOG.md"
   ],
   "license": "MIT",
   "dsh": {
@@ -53,10 +54,23 @@
   },
   "scripts": {
     "sync": "bash scripts/sync-from-monorepo.sh",
-    "build": "esbuild src/index.ts src/invariant.ts --bundle --format=esm --platform=node --target=es2022 --packages=external --outdir=lib"
+    "build": "esbuild src/index.ts src/invariant.ts --bundle --format=esm --platform=node --target=es2022 --packages=external --outdir=lib",
+    "test": "vitest run",
+    "check:client": "node scripts/check-client.mjs",
+    "check:locale": "node scripts/check-locale.mjs",
+    "check": "npm run check:client && npm run check:locale && npm run build"
   },
   "devDependencies": {
-    "esbuild": "^0.25.0"
+    "@deepseek-ai/cordis": "4.0.4",
+    "@deepseek-ai/cosmokit": "1.8.5",
+    "@deepseek-ai/dsh-invariants": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-llm": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-session": "0.2.0-rc.2",
+    "@deepseek-ai/dsh-user-questions": "0.2.0-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@types/node": "^26.6.5",
+    "esbuild": "^0.25.0",
+    "vitest": "^3.0.0"
   },
   "dependencies": {
     "grammy": "^1.29.0",

@@ -3,7 +3,7 @@
  */
 
 import { describe, expect, it } from 'vitest'
-import type { SessionSummary, WorkspaceView } from '@deepseek-ai/dsh-host-apiproxy'
+import type { SessionSummary, WorkspaceView } from '../src/apiproxy-shim.ts'
 import type { TokenUsage } from '@deepseek-ai/dsh-llm'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import {
@@ -891,7 +891,7 @@ describe('keyboard button budget', () => {
   it('shows a workspace name in full while it fits the button limit', () => {
     const title = 'dsh-messenger-gateway'
     const rows = workspaceKeyboardRows([workspaceRowItem({ workspaceId: 'ws-1', title })])
-    expect(rows[1]).toEqual([`/new 1 · ${title}`])
+    expect(rows[2]).toEqual([`/new 1 · ${title}`])
   })
 })
 

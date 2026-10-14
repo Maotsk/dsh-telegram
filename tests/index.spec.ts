@@ -6,9 +6,11 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import type { Context } from '@deepseek-ai/cordis'
-import type { ApiProxy, RpcResponse, WorkspaceId } from '@deepseek-ai/dsh-host-apiproxy'
-import { RpcId } from '@deepseek-ai/dsh-host-apiproxy'
+import type { ApiProxy, RpcResponse, WorkspaceId } from '../src/apiproxy-shim.ts'
+import { RpcId } from '../src/apiproxy-shim.ts'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
+import { isVolatile } from '@deepseek-ai/cosmokit'
+import { localize } from '../src/locale-ru.ts'
 import type { Bot } from 'grammy'
 import { COMMANDS, Config, DENIED_REPLY, TYPING_PUMP_INTERVAL_MS, createPort, startBotSession } from '../src/index.ts'
 
@@ -65,11 +67,15 @@ describe('Config schema', () => {
   it('requires the token and allowlist, defaults nothing else', () => {
     expect(() => Config({} as never)).toThrow()
     expect(() => Config({ botToken: 't' } as never)).toThrow()
-    expect(Config({ botToken: 't', allowChatIds: [1, 2] })).toEqual({ botToken: 't', allowChatIds: [1, 2] })
+    const parsed = Config({ botToken: 't', allowChatIds: [1, 2] })
+    expect(isVolatile(parsed.botToken) ? parsed.botToken.get() : parsed.botToken).toBe('t')
+    // Editable fields are volatile: they arrive as live handles, read via get().
+    expect(isVolatile(parsed.allowChatIds) ? parsed.allowChatIds.get() : parsed.allowChatIds).toEqual([1, 2])
   })
 
   it('accepts an optional proxy', () => {
-    expect(Config({ botToken: 't', allowChatIds: [], proxy: 'http://127.0.0.1:7890' }).proxy).toBe('http://127.0.0.1:7890')
+    const parsed = Config({ botToken: 't', allowChatIds: [], proxy: 'http://127.0.0.1:7890' })
+    expect(isVolatile(parsed.proxy) ? parsed.proxy.get() : parsed.proxy).toBe('http://127.0.0.1:7890')
   })
 
   it('rejects non-numeric chat ids', () => {
@@ -514,7 +520,7 @@ describe('startBotSession command registration', () => {
     // The menu sync runs asynchronously behind the scope teardown, so the
     // registration lands on a later tick.
     await vi.waitFor(() => {
-      expect(setMyCommands).toHaveBeenCalledWith(COMMANDS)
+      expect(setMyCommands).toHaveBeenCalledWith(COMMANDS.map(command => ({ command: command.command, description: localize(command.description ?? '', 'ru') })))
     })
     expect(onListened).toHaveBeenCalledWith(config, 'fakebot')
     await session.stop()
