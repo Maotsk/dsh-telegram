@@ -9,6 +9,13 @@ same channel the Web UI uses, from any chat you whitelist.
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](#license)
 ![Node](https://img.shields.io/badge/node-%3E%3D22.19-339933)
 [![Chinese](https://img.shields.io/badge/README-中文-red.svg)](README.zh.md)
+[![Russian](https://img.shields.io/badge/README-Русский-blue.svg)](README.ru.md)
+
+> **Fork note.** This is a fork of [Kevin66Z0/dsh-telegram](https://github.com/Kevin66Z0/dsh-telegram)
+> ported to **DSH 0.2.x** — upstream targets the 0.0.x `apiProxy` service, which 0.2.x no longer
+> ships, so it fails to import there. This fork talks to the in-process 0.2.x services the Web UI
+> itself uses, adds a Russian UI, a live web settings page (token, allowlist, proxy, language and
+> keyboard policy) and full-length button labels. Details: [FORK.md](FORK.md), [README.ru.md](README.ru.md).
 
 ---
 

@@ -120,9 +120,12 @@ export interface Config {
 
 /** Schemastery configuration for the Telegram console consumer. */
 export const Config: z<Config> = z.object({
-  // Not volatile: the token stays in the profile patch (usually a
-  // `!!js process.env.TELEGRAM_BOT_TOKEN` expression) and out of the web form.
-  botToken: z.string().required(),
+  // A secret form field: DSH redacts it in `describe()` listings, the web form
+  // sends an empty placeholder back unless the operator types a new token, and
+  // `keepSecretToken` below restores the previous value on such a save.
+  botToken: z.string().role('secret').default('')
+    .description('Токен бота от @BotFather. Пусто — берётся TELEGRAM_BOT_TOKEN из окружения; при сохранении пустое поле не затирает уже заданный токен')
+    .volatile(),
   allowChatIds: z.array(z.number()).required()
     .description('Разрешённые чаты: id чатов, которым бот отвечает. Пустой список — бот отказывает всем')
     .volatile(),
@@ -541,18 +544,28 @@ export function startBotSession(options: {
  * @param config - validated plugin configuration (the settings base layer).
  */
 export function apply(ctx: Context, config: Config): void {
+  // The token is a redacted secret: a settings save that leaves the field empty
+  // must not disconnect the bot, so the last non-empty value wins.
+  let lastToken = ''
   /**
    * Effective configuration: the volatile schema fields arrive as live handles
    * whose `get()` already reflects the settings page's latest committed value.
    */
-  const readConfig = (): Config => ({
-    botToken: plainValue(config.botToken),
-    allowChatIds: plainValue(config.allowChatIds) ?? [],
-    proxy: plainValue(config.proxy) ?? '',
-    locale: plainValue(config.locale),
-    keyboard: plainValue(config.keyboard),
-  })
+  const readConfig = (): Config => {
+    const token = String(plainValue(config.botToken) ?? '').trim()
+    if (token !== '') lastToken = token
+    return {
+      botToken: token === '' ? lastToken : token,
+      allowChatIds: plainValue(config.allowChatIds) ?? [],
+      proxy: plainValue(config.proxy) ?? '',
+      locale: plainValue(config.locale),
+      keyboard: plainValue(config.keyboard),
+    }
+  }
   const initial = readConfig()
+  if (initial.botToken === '') {
+    console.log('telegram: bot token is not configured — set it in the plugin settings or TELEGRAM_BOT_TOKEN')
+  }
   console.log(`telegram: configuring bot for ${initial.allowChatIds.length} allowed chat ids`)
   ctx.inject([...HOST_API_SERVICES], (apiCtx) => {
     const api = createHostApi(apiCtx)

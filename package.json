@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-host-telegram",
   "description": "Telegram remote-control surface for dsh sessions: whitelisted chats list, read, prompt, and stop dsh sessions through the host ApiProxy",
-  "version": "0.1.0-rc.8",
+  "version": "0.1.0-rc.9",
   "publishConfig": {
     "access": "public"
   },
@@ -32,7 +32,9 @@
     "cordis.patch.yml",
     "lib/types/**/*.d.ts",
     "README.md",
-    "README.zh.md"
+    "README.ru.md",
+    "README.zh.md",
+    "FORK.md"
   ],
   "license": "MIT",
   "dsh": {
