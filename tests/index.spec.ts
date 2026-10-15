@@ -12,7 +12,7 @@ import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { isVolatile } from '@deepseek-ai/cosmokit'
 import { localize } from '../src/locale-ru.ts'
 import type { Bot } from 'grammy'
-import { COMMANDS, Config, DENIED_REPLY, TYPING_PUMP_INTERVAL_MS, createPort, startBotSession } from '../src/index.ts'
+import { COMMANDS, Config, DENIED_REPLY, PHOTO_ONLY_HINT, TYPING_PUMP_INTERVAL_MS, createPort, startBotSession } from '../src/index.ts'
 
 function ok<T>(value: T, requestId: RpcId = RpcId('r')): RpcResponse<T> {
   return { rpcId: requestId, result: { ok: true, value } }
@@ -60,6 +60,9 @@ function fakeApi(): { api: ApiProxy; lastPromptRpcId: () => RpcId } {
       }
       return RpcId('none')
     },
+    /** Every `sessions.prompt` payload, in call order. */
+    promptPayloads: (): { sessionId: string, mode: string, content: unknown[] }[] =>
+      calls.filter(call => call.kind === 'prompt').map(call => call.request.payload as { sessionId: string, mode: string, content: unknown[] }),
   }
 }
 
@@ -477,11 +480,18 @@ function fakeBot() {
   const deleteMyCommands = vi.fn().mockResolvedValue(true)
   const setMyCommands = vi.fn().mockResolvedValue(true)
   const stop = vi.fn().mockResolvedValue(undefined)
+  const sendMessage = vi.fn().mockResolvedValue({ message_id: 1 })
+  const getFile = vi.fn()
+  const handlers = new Map<string, (context: never) => unknown>()
   const startOptions: { onStart?: (botInfo: { username: string }) => void } = {}
   const bot = {
-    api: { deleteMyCommands, setMyCommands },
+    token: 'token:fake',
+    api: { deleteMyCommands, setMyCommands, sendMessage, getFile },
     catch: vi.fn(),
-    on: vi.fn(),
+    on(filter: string, handler: (context: never) => unknown) {
+      handlers.set(filter, handler)
+      return bot
+    },
     start(options: { onStart?: (botInfo: { username: string }) => void }): Promise<void> {
       if (options.onStart !== undefined) {
         startOptions.onStart = options.onStart
@@ -490,7 +500,7 @@ function fakeBot() {
     },
     stop,
   } as unknown as Bot
-  return { bot, deleteMyCommands, setMyCommands, startOptions, stop }
+  return { bot, deleteMyCommands, setMyCommands, sendMessage, getFile, handlers, startOptions, stop }
 }
 
 function fakeLogger(): Context['logger'] {
@@ -549,5 +559,166 @@ describe('startBotSession command registration', () => {
     expect(String(warn.mock.calls[0]?.[0])).toContain('command menu registration failed')
     expect(onListened).toHaveBeenCalled()
     await session.stop()
+  })
+})
+
+/** The wiring the inbound-image tests drive: a bound chat, a stub file fetch. */
+function startMediaSession(options: { photoOnlyMode?: string } = {}) {
+  const fake = fakeBot()
+  fake.getFile.mockResolvedValue({ file_path: 'photos/file_1.jpg' })
+  const fetchFile = vi.fn(async () => ({
+    ok: true,
+    status: 200,
+    arrayBuffer: async () => Uint8Array.from([1, 2, 3]).buffer,
+  }))
+  const api = fakeApi()
+  const session = startBotSession({
+    config: {
+      botToken: 'token:fake',
+      allowChatIds: [1],
+      ...(options.photoOnlyMode === undefined ? {} : { photoOnlyMode: options.photoOnlyMode }),
+    },
+    api: api.api,
+    events: fakeEvents(),
+    logger: fakeLogger(),
+    onListened: vi.fn(),
+    createBot: () => fake.bot,
+    fetchFile,
+  })
+  const fire = (filter: string, update: unknown): void => {
+    const handler = fake.handlers.get(filter)
+    if (handler === undefined) throw new Error(`no ${filter} handler registered`)
+    ;(handler as (context: unknown) => void)(update)
+  }
+  /** Bind chat 1 to a fixed session id through the console's own /attach path. */
+  const bind = async (): Promise<void> => {
+    fire('message:text', { chat: { id: 1 }, message: { text: '/attach aaa' } })
+    await vi.waitFor(() => {
+      expect(fake.sendMessage).toHaveBeenCalled()
+    })
+  }
+  const texts = (): string[] => fake.sendMessage.mock.calls.map(call => String(call[1]))
+  return { ...fake, session, api, fire, bind, texts, fetchFile }
+}
+
+describe('inbound images', () => {
+  it('keeps a captionless photo waiting in prompt mode and sends it with the question', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f1', file_size: 12 }] } })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('Фото получено'))).toBe(true)
+    })
+    // Nothing reaches the agent until the question does.
+    expect(harness.api.promptPayloads()).toEqual([])
+    harness.fire('message:text', { chat: { id: 1 }, message: { text: 'что на фото?' } })
+    await vi.waitFor(() => {
+      expect(harness.api.promptPayloads()).toHaveLength(1)
+    })
+    expect(harness.api.promptPayloads()[0]?.content).toEqual([
+      { type: 'image', mediaType: 'image/jpeg', data: 'AQID', name: 'photo.jpg' },
+      { type: 'text', text: 'что на фото?' },
+    ])
+    await harness.session.stop()
+  })
+
+  it('hints once for a whole album of captionless photos', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f1', file_size: 12 }] } })
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f2', file_size: 12 }] } })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('Фото получено'))).toBe(true)
+    })
+    await new Promise(resolve => setTimeout(resolve, 900))
+    expect(harness.texts().filter(text => text.includes('Фото получено'))).toHaveLength(1)
+    harness.fire('message:text', { chat: { id: 1 }, message: { text: 'обе картинки' } })
+    await vi.waitFor(() => {
+      expect(harness.api.promptPayloads()).toHaveLength(1)
+    })
+    expect(harness.api.promptPayloads()[0]?.content).toHaveLength(3)
+    await harness.session.stop()
+  })
+
+  it('forwards a captioned photo without waiting for more text', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f1', file_size: 12 }], caption: 'что тут?' } })
+    await vi.waitFor(() => {
+      expect(harness.api.promptPayloads()).toHaveLength(1)
+    })
+    expect(harness.api.promptPayloads()[0]?.content).toEqual([
+      { type: 'image', mediaType: 'image/jpeg', data: 'AQID', name: 'photo.jpg' },
+      { type: 'text', text: 'что тут?' },
+    ])
+    await harness.session.stop()
+  })
+
+  it('forwards a captionless photo at once in run mode, with a placeholder line', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'run' })
+    await harness.bind()
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f1', file_size: 12 }] } })
+    await vi.waitFor(() => {
+      expect(harness.api.promptPayloads()).toHaveLength(1)
+    })
+    expect(harness.api.promptPayloads()[0]?.content).toEqual([
+      { type: 'image', mediaType: 'image/jpeg', data: 'AQID', name: 'photo.jpg' },
+      { type: 'text', text: localize(PHOTO_ONLY_HINT, 'ru') },
+    ])
+    await harness.session.stop()
+  })
+
+  it('accepts an image document and rejects other documents', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:document', {
+      chat: { id: 1 },
+      message: { document: { file_id: 'd1', mime_type: 'image/png', file_name: 'shot.png', file_size: 12 } },
+    })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('Фото получено'))).toBe(true)
+    })
+    harness.fire('message:document', {
+      chat: { id: 1 },
+      message: { document: { file_id: 'd2', mime_type: 'application/pdf', file_name: 'doc.pdf' } },
+    })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('Формат изображения не поддерживается'))).toBe(true)
+    })
+    expect(harness.api.promptPayloads()).toEqual([])
+    await harness.session.stop()
+  })
+
+  it('refuses an image above the Telegram download ceiling', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:photo', {
+      chat: { id: 1 },
+      message: { photo: [{ file_id: 'f1', file_size: 21 * 1024 * 1024 }] },
+    })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('слишком большое'))).toBe(true)
+    })
+    expect(harness.fetchFile).not.toHaveBeenCalled()
+    await harness.session.stop()
+  })
+
+  it('keeps a pending photo across a command and reports a failed download', async () => {
+    const harness = startMediaSession({ photoOnlyMode: 'prompt' })
+    await harness.bind()
+    harness.fire('message:photo', { chat: { id: 1 }, message: { photo: [{ file_id: 'f1', file_size: 12 }] } })
+    harness.fire('message:text', { chat: { id: 1 }, message: { text: '/start' } })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    expect(harness.api.promptPayloads()).toEqual([])
+    harness.getFile.mockRejectedValue(new Error('file is gone'))
+    harness.fire('message:text', { chat: { id: 1 }, message: { text: 'всё равно посмотри' } })
+    await vi.waitFor(() => {
+      expect(harness.api.promptPayloads()).toHaveLength(1)
+    })
+    await vi.waitFor(() => {
+      expect(harness.texts().some(text => text.includes('Не удалось скачать изображение'))).toBe(true)
+    })
+    expect(harness.api.promptPayloads()[0]?.content).toEqual([{ type: 'text', text: 'всё равно посмотри' }])
+    await harness.session.stop()
   })
 })

@@ -32,11 +32,15 @@ import z from '@deepseek-ai/schemastery'
 import { Bot } from 'grammy'
 import type { BotCommand, BotCommandScope } from 'grammy/types'
 import { ProxyAgent, fetch as undiciFetch } from 'undici'
-import type { AgentPresetEntry, ApiProxy, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
+import type { AgentPresetEntry, ApiProxy, ModelCatalogFailure, ModelProviderGroup, PromptContentPart, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
 import { RpcId } from './apiproxy-shim.ts'
 import type { SessionEvent, SessionId, TodoItem } from '@deepseek-ai/dsh-session'
 import type { AskUserQuestionAnswer } from '@deepseek-ai/dsh-user-questions'
 import { isVolatile, type Volatile } from '@deepseek-ai/cosmokit'
+import {
+  documentImageFile, imagePart, photoImageFile, withinTelegramLimit,
+  type InboundImageFile, type TelegramMediaMessage,
+} from './inbound-media.ts'
 import { createHostApi, HOST_API_SERVICES } from './host-api.ts'
 import { registerConfigRoute } from './config-route.ts'
 import { localize, localizeRows, type BotLocale } from './locale-ru.ts'
@@ -111,6 +115,13 @@ export interface Config {
    */
   locale?: string
   /**
+   * What a photo (or image document) sent without any caption does:
+   * `prompt` (default) keeps the image pending and asks for the question —
+   * the agent only starts once text arrives; `run` forwards the image
+   * immediately with a placeholder line. A caption always runs right away.
+   */
+  photoOnlyMode?: string
+  /**
    * Bottom reply-keyboard policy: `dismissible` (default — Telegram's own
    * toggle hides it), `off` (the bot never installs one; navigation stays on
    * inline buttons and typed commands) or `persistent` (upstream's sticky
@@ -139,11 +150,19 @@ export const Config: z<Config> = z.object({
   keyboard: z.string()
     .description('Нижняя клавиатура бота: dismissible — можно свернуть (по умолчанию), off — не показывать совсем, persistent — закреплена всегда')
     .volatile(),
+  photoOnlyMode: z.string()
+    .description('Фото без подписи: prompt — ждать вопрос пользователя (по умолчанию), run — сразу отправить агенту. Подпись к фото всегда запускает ответ сразу')
+    .volatile(),
 })
 
 /** Chat locale of one configuration, defaulting to Russian. */
 function resolveLocale(config: Config): BotLocale {
   return config.locale === 'zh' ? 'zh' : 'ru'
+}
+
+/** Photo-without-caption policy of one configuration. */
+function resolvePhotoOnlyMode(config: Config): 'prompt' | 'run' {
+  return config.photoOnlyMode === 'run' ? 'run' : 'prompt'
 }
 
 /** Bottom reply-keyboard policy of one configuration. */
@@ -171,7 +190,12 @@ export const inject = HOST_API_SERVICES
 
 /** The proxy this deployment uses, or undefined for a direct connection. */
 function resolveProxy(config: Config): string | undefined {
-  return config.proxy ?? process.env.ALL_PROXY ?? process.env.HTTPS_PROXY ?? undefined
+  // An empty configured value means "not set", so the process-wide proxy still
+  // applies; a blank string would otherwise build a `ProxyAgent('')`.
+  const configured = String(config.proxy ?? '').trim()
+  if (configured !== '') return configured
+  const inherited = String(process.env.ALL_PROXY ?? process.env.HTTPS_PROXY ?? '').trim()
+  return inherited === '' ? undefined : inherited
 }
 
 /**
@@ -197,10 +221,10 @@ export function createPort(api: ApiProxy): SessionConsolePort {
       if (!response.result.ok) throw failure(response.result.error.message, response.result.error.code)
       return response.result.value.events.map(entry => entry.event)
     },
-    async sendPrompt(sessionId: SessionId, mode: 'queue' | 'steer', text: string): Promise<void> {
+    async sendPrompt(sessionId: SessionId, mode: 'queue' | 'steer', content: readonly PromptContentPart[]): Promise<void> {
       const response = await api.sessions.prompt({
         rpcId: rpcId(),
-        payload: { sessionId, mode, content: [{ type: 'text', text }] },
+        payload: { sessionId, mode, content: [...content] },
       })
       if (!response.result.ok) throw failure(response.result.error.message, response.result.error.code)
     },
@@ -378,6 +402,51 @@ function syncCommandMenu(bot: Bot, logger: Context['logger'], locale: BotLocale)
 }
 
 /**
+ * Reply to a photo that arrived without a caption while `photoOnlyMode` is
+ * `prompt`: the image is kept, the agent starts only once the question lands.
+ */
+export const PHOTO_ONLY_REPLY = '📷 已收到图片。请发送问题 — 例如「这张图里是什么？」'
+
+/** Stand-in prompt line for a captionless photo forwarded at once (`run` mode). */
+export const PHOTO_ONLY_HINT = '📷 [用户发来照片]'
+
+/**
+ * Album items arrive as separate updates; one hint per burst is enough, so the
+ * reply waits a moment for the rest of the album before it goes out.
+ */
+export const PHOTO_ONLY_REPLY_DELAY_MS = 700
+
+/** Reply for an image whose declared MIME the harness attachment store rejects. */
+export const UNSUPPORTED_IMAGE_REPLY = '⛔ 图片格式不支持：仅支持 PNG、JPEG、WebP、GIF。'
+
+/** Reply for an image above Telegram's own bot-download ceiling. */
+export const IMAGE_TOO_LARGE_REPLY = '⛔ 图片太大，Telegram 不允许机器人下载（上限 20 МБ）。'
+
+/** Reply when the Bot API refused the file download. */
+export const IMAGE_DOWNLOAD_FAILED_REPLY = '⛔ 无法下载图片。'
+
+/** The fetch face the file download needs; both undici's and the global fetch fit. */
+export type FileFetch = (url: string) => Promise<{ ok: boolean, status: number, arrayBuffer(): Promise<ArrayBuffer> }>
+
+/**
+ * Fetch one Telegram file's bytes. `api.getFile` resolves the id through the
+ * bot's own (proxy-tunnelled) client; the bytes themselves come from the
+ * documented `file/bot<token>/<file_path>` URL through the same transport.
+ * @param bot - the bot owning the token.
+ * @param fileId - the Bot API file id to resolve and download.
+ * @param fetchImpl - the transport to read the bytes with.
+ * @returns the downloaded bytes.
+ */
+export async function downloadTelegramFile(bot: Bot, fileId: string, fetchImpl: FileFetch): Promise<Uint8Array> {
+  const file = await bot.api.getFile(fileId)
+  const filePath = file.file_path
+  if (filePath === undefined || filePath === '') throw new Error('Telegram returned no file_path')
+  const response = await fetchImpl(`https://api.telegram.org/file/bot${bot.token}/${filePath}`)
+  if (!response.ok) throw new Error(`telegram file download failed: HTTP ${response.status}`)
+  return new Uint8Array(await response.arrayBuffer())
+}
+
+/**
  * Build one bot session for the given configuration. The session owns the
  * grammY client (with its proxy tunnel), the console, and the realtime event
  * feed; settings changes rebuild the session by stopping the old one. At
@@ -397,6 +466,11 @@ export function startBotSession(options: {
    * long-polling bot over the proxy tunnel.
    */
   createBot?: (config: Config, proxyAgent: ProxyAgent | undefined) => Bot
+  /**
+   * Replace the file-download transport under test — the default rides the
+   * proxy tunnel (or the global fetch on a direct connection).
+   */
+  fetchFile?: FileFetch
 }): BotSession {
   const { config, api, events, logger, onListened } = options
   const allowed = new Set(config.allowChatIds)
@@ -470,21 +544,136 @@ export function startBotSession(options: {
     },
   }
   const telegramConsole = new TelegramConsole(createPort(api), transport)
+  const photoOnlyMode = resolvePhotoOnlyMode(config)
+  /** Captionless images waiting for the question (`prompt` mode), keyed by chat id. */
+  const pendingImages = new Map<number, InboundImageFile[]>()
+  /** One debounced "send your question" hint per burst, keyed by chat id. */
+  const pendingHints = new Map<number, ReturnType<typeof setTimeout>>()
+  // The bytes ride the same tunnel as the Bot API calls: the global fetch
+  // ignores the proxy dispatcher entirely, so a proxy deployment must use
+  // undici's fetch here too.
+  const fetchFile: FileFetch = options.fetchFile ?? (proxyAgent === undefined
+    ? async url => fetch(url)
+    : async url => undiciFetch(url, { dispatcher: proxyAgent }))
+
+  /** Refuse one chat outside the allowlist; nothing but its own id leaks back. */
+  const refuse = (chatId: number): void => {
+    logger.warn(`telegram: chat ${chatId} refused: not in allowChatIds`)
+    // The reply carries the caller's own chat id so the operator can paste
+    // it straight into the allowlist; nothing else about the surface leaks.
+    void bot.api.sendMessage(chatId, localize(`${DENIED_REPLY} 如需访问，请将 chat id ${chatId} 加入 allowChatIds 白名单。`, locale)).catch((error: unknown) => {
+      logger.debug(`telegram: denial reply failed: ${String(error)}`)
+    })
+  }
+
+  /** Fire-and-forget reply for the media flow; a failed hint never breaks routing. */
+  const replyQuietly = (chatId: number, text: string): void => {
+    void transport.sendMessage(chatId, text).catch((error: unknown) => {
+      logger.debug(`telegram: media reply failed: ${String(error)}`)
+    })
+  }
+
+  /** Download queued files into prompt parts, reporting the ones that failed. */
+  const toImageParts = async (chatId: number, files: readonly InboundImageFile[]): Promise<PromptContentPart[]> => {
+    const parts: PromptContentPart[] = []
+    for (const file of files) {
+      try {
+        const bytes = await downloadTelegramFile(bot, file.fileId, fetchFile)
+        parts.push(imagePart({
+          mediaType: file.mediaType,
+          data: bytes,
+          ...(file.name === undefined ? {} : { name: file.name }),
+        }))
+      } catch (error: unknown) {
+        logger.warn(`telegram: image download failed: ${String(error)}`)
+        replyQuietly(chatId, IMAGE_DOWNLOAD_FAILED_REPLY)
+      }
+    }
+    return parts
+  }
+
+  /** Take the chat's pending images (and cancel their hint) for one prompt. */
+  const takePendingImages = (chatId: number): InboundImageFile[] => {
+    const queued = pendingImages.get(chatId) ?? []
+    pendingImages.delete(chatId)
+    const hint = pendingHints.get(chatId)
+    if (hint !== undefined) {
+      clearTimeout(hint)
+      pendingHints.delete(chatId)
+    }
+    return queued
+  }
+
+  /** One hint per burst: album items arrive as separate updates in quick succession. */
+  const schedulePendingHint = (chatId: number): void => {
+    const existing = pendingHints.get(chatId)
+    if (existing !== undefined) clearTimeout(existing)
+    const timer = setTimeout(() => {
+      pendingHints.delete(chatId)
+      replyQuietly(chatId, PHOTO_ONLY_REPLY)
+    }, PHOTO_ONLY_REPLY_DELAY_MS)
+    pendingHints.set(chatId, timer)
+  }
+
+  /**
+   * Route one inbound image. A caption is a question, so it forwards at once;
+   * a captionless image waits for the text under `prompt` mode (the default)
+   * and goes straight to the agent with a placeholder line under `run`.
+   */
+  const routeInboundImage = (chatId: number, file: InboundImageFile | undefined, caption: string, unsupported: boolean): void => {
+    if (!allowed.has(chatId)) {
+      refuse(chatId)
+      return
+    }
+    if (file === undefined) {
+      if (unsupported) replyQuietly(chatId, UNSUPPORTED_IMAGE_REPLY)
+      return
+    }
+    if (!withinTelegramLimit(file.bytes)) {
+      replyQuietly(chatId, IMAGE_TOO_LARGE_REPLY)
+      return
+    }
+    const body = caption.trim()
+    if (body !== '' || photoOnlyMode === 'run') {
+      void (async () => {
+        const images = await toImageParts(chatId, [file])
+        // The placeholder line is agent-facing, so it follows the chat locale.
+        const prompt = body === '' ? localize(PHOTO_ONLY_HINT, locale) : body
+        await telegramConsole.handleMessage(chatId, prompt, images)
+      })().catch((error: unknown) => {
+        logger.warn(`telegram: message handling failed: ${String(error)}`)
+      })
+      return
+    }
+    // `prompt` mode: keep the image; the agent starts when the question lands.
+    pendingImages.set(chatId, [...(pendingImages.get(chatId) ?? []), file])
+    schedulePendingHint(chatId)
+  }
 
   bot.on('message:text', (messageContext) => {
     const chatId = messageContext.chat.id
     if (!allowed.has(chatId)) {
-      logger.warn(`telegram: chat ${chatId} refused: not in allowChatIds`)
-      // The reply carries the caller's own chat id so the operator can paste
-      // it straight into the allowlist; nothing else about the surface leaks.
-      void bot.api.sendMessage(chatId, localize(`${DENIED_REPLY} 如需访问，请将 chat id ${chatId} 加入 allowChatIds 白名单。`, locale)).catch((error: unknown) => {
-        logger.debug(`telegram: denial reply failed: ${String(error)}`)
-      })
+      refuse(chatId)
       return
     }
-    void telegramConsole.handleMessage(chatId, messageContext.message.text).catch((error: unknown) => {
+    const text = messageContext.message.text
+    // A command never consumes pending images: the next real question does.
+    const queued = text.trimStart().startsWith('/') ? [] : takePendingImages(chatId)
+    void (async () => {
+      const images = await toImageParts(chatId, queued)
+      await telegramConsole.handleMessage(chatId, text, images)
+    })().catch((error: unknown) => {
       logger.warn(`telegram: message handling failed: ${String(error)}`)
     })
+  })
+
+  bot.on('message:photo', (messageContext) => {
+    routeInboundImage(messageContext.chat.id, photoImageFile(messageContext.message), messageContext.message.caption ?? '', false)
+  })
+
+  bot.on('message:document', (messageContext) => {
+    const message = messageContext.message
+    routeInboundImage(messageContext.chat.id, documentImageFile(message), message.caption ?? '', message.document !== undefined)
   })
 
   bot.on('callback_query', (callbackContext) => {
@@ -530,6 +719,8 @@ export function startBotSession(options: {
       stopped = true
       stopEvents()
       clearInterval(typingTimer)
+      for (const hint of pendingHints.values()) clearTimeout(hint)
+      pendingHints.clear()
       await bot.stop()
     },
   }
@@ -561,6 +752,7 @@ export function apply(ctx: Context, config: Config): void {
       proxy: plainValue(config.proxy) ?? '',
       locale: plainValue(config.locale),
       keyboard: plainValue(config.keyboard),
+      photoOnlyMode: plainValue(config.photoOnlyMode),
     }
   }
   const initial = readConfig()
@@ -595,16 +787,17 @@ export function apply(ctx: Context, config: Config): void {
 
     // The web settings page: DSH 0.2.x projects a profile entry into a live
     // form when its Config marks fields `.volatile()`. `allowChatIds`, `proxy`,
-    // `locale` and `keyboard` are marked, so Настройки → Плагины shows them;
-    // the handles above carry a committed edit straight into `readConfig()`,
-    // and the events plus a slow sweep rebuild the bot session on a change.
+    // `locale`, `keyboard` and `photoOnlyMode` are marked, so Настройки →
+    // Плагины shows them; the handles above carry a committed edit straight
+    // into `readConfig()`, and the events plus a slow sweep rebuild the bot
+    // session on a change.
     let current = initial
     const reconcile = (): void => {
       try {
         const next = readConfig()
         if (JSON.stringify(next) === JSON.stringify(current)) return
         current = next
-        console.log(`telegram: applying settings (${next.allowChatIds.length} allowed chat ids, locale ${resolveLocale(next)}, keyboard ${resolveKeyboard(next)})`)
+        console.log(`telegram: applying settings (${next.allowChatIds.length} allowed chat ids, locale ${resolveLocale(next)}, keyboard ${resolveKeyboard(next)}, photoOnly ${resolvePhotoOnlyMode(next)})`)
         startSession(next)
       } catch (error) {
         logger.warn?.(`telegram: settings apply failed: ${String(error)}`)

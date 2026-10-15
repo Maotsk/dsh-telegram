@@ -23,6 +23,7 @@ export interface EditableConfig {
   proxy: string
   locale: string
   keyboard: string
+  photoOnlyMode: string
 }
 
 /** What the card receives: no secret material, only its configured state. */
@@ -32,6 +33,7 @@ interface PublicConfig {
   proxy: string
   locale: string
   keyboard: string
+  photoOnlyMode: string
 }
 
 /** The route path the card calls. */
@@ -97,6 +99,7 @@ function publicConfig(config: EditableConfig): PublicConfig {
     proxy: String(config.proxy ?? ''),
     locale: config.locale === 'zh' ? 'zh' : 'ru',
     keyboard: ['off', 'persistent'].includes(config.keyboard) ? config.keyboard : 'dismissible',
+    photoOnlyMode: config.photoOnlyMode === 'run' ? 'run' : 'prompt',
   }
 }
 
@@ -114,6 +117,9 @@ function patchOf(body: unknown): Record<string, unknown> {
   if (typeof source.locale === 'string') patch.locale = source.locale === 'zh' ? 'zh' : 'ru'
   if (typeof source.keyboard === 'string') {
     patch.keyboard = ['off', 'persistent'].includes(source.keyboard) ? source.keyboard : 'dismissible'
+  }
+  if (typeof source.photoOnlyMode === 'string') {
+    patch.photoOnlyMode = source.photoOnlyMode === 'run' ? 'run' : 'prompt'
   }
   // An empty token keeps the configured one; only a typed value overwrites it.
   if (typeof source.botToken === 'string' && source.botToken.trim() !== '') patch.botToken = source.botToken.trim()

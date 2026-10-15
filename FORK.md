@@ -20,6 +20,7 @@ telegram (@deepseek-ai/dsh-host-telegram): failed to import   # имя апст�
 | `src/host-api.ts` | новый. Тот же `ApiProxy`, но поверх **in-process сервисов DSH 0.2.x** — тех же, которыми пользуется веб-интерфейс: `sessionController` (`list`, `page`, `create`, `prompt`, `cancel`, `fork`, `rename`, `modelCatalog`), `workspaceRegistry` / `workspaceController` (список, создание, архив), `agentDefaultModel` (глобальная модель), `agentPresets` + `agents` (пресеты), `settingsController` (прочие настройки). Плюс мост вопросов агента: `question/asked` и `question/decided` синтезируются из waterfall-события `user-questions/request`, ответ уходит либо в тот же waterfall (открытый вопрос), либо в `userQuestions.answer(agent, callId, …)` (просроченный вопрос). Реальная лента сессий (`ctx.on('session/event')`) прокидывается как есть. |
 | `src/index.ts` | `inject` вместо `['apiProxy']` — `HOST_API_SERVICES`; API строится через `createHostApi(apiCtx)`; события консоли берутся из `api.events`; удалён `installSettingsSection` (в 0.2.x его нет — конфигурация читается из строки плагина в `cordis.patch.yml` профиля). |
 | `src/console.ts`, `src/render.ts` | импорт типов переведён на локальный шим. |
+| `src/inbound-media.ts` | новый (0.2.1). Помощники приёма картинок: выбор крупнейшей версии фото, фильтр MIME под attachment-store DSH, лимит Telegram, image-часть промпта. |
 | `package.json` | версия `0.1.0-rc.7`, убраны несуществующие зависимости (`dsh-host-apiproxy`, `dsh-settings`), добавлены `build`-скрипт и `esbuild` в devDependencies. |
 
 `lib/index.js` собран из этих исходников: `npm run build`
@@ -82,6 +83,7 @@ DSH (`settings.plugin.item`, `plugins.item`, `plugins.row.config`) и рисуе
 | `proxy` | HTTP-прокси для Telegram (только CONNECT); пусто — `ALL_PROXY`/`HTTPS_PROXY` или прямое подключение |
 | `locale` | язык интерфейса: `ru` (по умолчанию) или `zh` |
 | `keyboard` | нижняя клавиатура: `dismissible` (по умолчанию — сворачивается кнопкой Telegram), `off` (не показывать совсем), `persistent` (закреплена) |
+| `photoOnlyMode` | фото без подписи: `prompt` (по умолчанию — ждать вопрос пользователя), `run` (сразу отправить агенту с пометкой) |
 
 Браузер не может дотянуться до cordis-сервисов, поэтому карточка ходит в
 собственный маршрут плагина:
@@ -91,12 +93,37 @@ GET  /dsh-host-telegram/config   — текущие значения (токен
 PUT  /dsh-host-telegram/config   — проверка доверенного запроса, затем settings.update()
 ```
 
-Все пять полей помечены `.volatile()`, поэтому значения приходят в плагин
+Все шесть полей помечены `.volatile()`, поэтому значения приходят в плагин
 «живыми» handle'ами (`Volatile<T>` из `@deepseek-ai/cosmokit`, читаются через
 `isVolatile()`/`get()` — без разворачивания получается `undefined`). `apply()`
 заново собирает эффективный конфиг и пересобирает сессию бота по событиям
 `settings/document-updated`, `loader/volatile-update`, `app-boot/config-reload`
 и по сверке раз в 5 секунд — то есть правки применяются без перезапуска DSH.
+
+## Фото и картинки-документы
+
+Апстрим обрабатывал только `message:text`, поэтому фотография молча пропадала.
+В форке добавлены обработчики `message:photo` и `message:document`:
+
+- `src/inbound-media.ts` (новый) — чистые помощники: выбор самой крупной версии
+  фото, фильтр MIME (`image/png`, `image/jpeg`, `image/webp`, `image/gif` —
+  ровно те, что принимает attachment-store DSH), лимит Telegram 20 МБ и
+  преобразование байтов в image-часть промпта (`base64`).
+- `src/index.ts` — `api.getFile` резолвит файл через клиент бота (то есть через
+  прокси), байты скачиваются из `api.telegram.org/file/bot<token>/<file_path>`
+  тем же транспортом; при ошибке в чат уходит «не удалось скачать изображение»,
+  а текст промпта всё равно отправляется.
+- Промпт собирается как `[image, …, { text }]` — тот же shape, что отправляет
+  веб-форма; `sessionController.prompt` сам превращает base64 в durable-ссылку.
+  Раньше хост-адаптер (`src/host-api.ts`) отфильтровывал всё, кроме `text`.
+- Режим `photoOnlyMode` (по умолчанию `prompt`, как в `dsh-messenger-gateway`):
+  фото без подписи не запускает агента, а копится в `pendingImages` чата; бот
+  отвечает подсказкой (одна на альбом — апдейты одного альбома приходят
+  по отдельности, поэтому ответ отложен на 700 мс) и отправляет картинки вместе
+  со следующим текстом. Команда (`/…`) картинки не «съедает» — они ждут вопроса.
+  Режим `run` отправляет фото сразу, вместо вопроса ставя пометку
+  `[Пользователь прислал фото]`. Подпись к фото — это вопрос, она запускает
+  агента немедленно в любом режиме.
 
 ## Русский интерфейс
 

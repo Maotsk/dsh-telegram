@@ -8,7 +8,7 @@
  */
 
 import { SessionId, type SessionEvent, type SessionId as SessionIdBrand, type TodoItem, type TurnEndReason } from '@deepseek-ai/dsh-session'
-import type { AgentPresetEntry, ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
+import type { AgentPresetEntry, ModelCatalogFailure, ModelProviderGroup, PromptContentPart, SessionSummary, WorkspaceId, WorkspaceView } from './apiproxy-shim.ts'
 import type { AskUserQuestionAnswer, AskUserQuestionItem } from '@deepseek-ai/dsh-user-questions'
 import {
   ASSISTANT_ROLE_GLYPH, HISTORY_DEFAULT_LIMIT, KEYBOARD_ACTION_ROWS,
@@ -32,8 +32,12 @@ export interface SessionConsolePort {
   listSessions(): Promise<SessionSummary[]>
   /** Raw tail page of session events (API-aligned message boundaries). */
   readHistory(sessionId: SessionIdBrand, maxMessages?: number): Promise<readonly SessionEvent[]>
-  /** Send one text prompt; resolves after durable host admission. Throws a UI-ready message on refusal. */
-  sendPrompt(sessionId: SessionIdBrand, mode: 'queue' | 'steer', text: string): Promise<void>
+  /**
+   * Send one prompt — text and/or image content parts, the same shape the web
+   * composer submits; resolves after durable host admission. Throws a UI-ready
+   * message on refusal.
+   */
+  sendPrompt(sessionId: SessionIdBrand, mode: 'queue' | 'steer', content: readonly PromptContentPart[]): Promise<void>
   /** Stop the session's active turn. Throws a UI-ready message on refusal. */
   stopSession(sessionId: SessionIdBrand): Promise<void>
   /** Host-wide model catalog over every configured provider, needing no session. Throws a UI-ready message on refusal. */
@@ -352,10 +356,13 @@ export class TelegramConsole {
   /**
    * Handle one allowed chat's incoming text message (commands and prompts).
    * @param chatId - the sender chat id.
-   * @param text - the raw message text.
+   * @param text - the raw message text (empty when only images arrived).
+   * @param attachments - image content parts that belong to this message;
+   * they ride {@link #handlePrompt} onto the bound session and are ignored by
+   * the command and text-collection flows (rename, custom ask answer).
    * @returns after replies are dispatched.
    */
-  async handleMessage(chatId: number, text: string): Promise<void> {
+  async handleMessage(chatId: number, text: string, attachments: readonly PromptContentPart[] = []): Promise<void> {
     const state = this.#state(chatId)
     const input = interpretInput(text)
     if ('kind' in input) {
@@ -372,7 +379,7 @@ export class TelegramConsole {
         await this.#handleAskCustomText(chatId, state, state.awaitingAskAnswer, input.text)
         return
       }
-      await this.#handlePrompt(chatId, state, input.text)
+      await this.#handlePrompt(chatId, state, input.text, attachments)
       return
     }
     // Any / command cancels a pending rename and a custom-answer arm; the
@@ -961,30 +968,42 @@ export class TelegramConsole {
   }
 
   /**
-   * Forward one free-text prompt to the bound session.
+   * Forward one prompt — free text and the images that arrived with it — to
+   * the bound session.
    * @param chatId - the sender chat id.
    * @param state - the chat's console state.
-   * @param text - the prompt text.
+   * @param text - the prompt text (empty when only images arrived).
+   * @param attachments - image content parts riding this prompt.
    * @returns after the forward dispatches (a refusal reply on failure).
    */
-  async #handlePrompt(chatId: number, state: ChatState, text: string): Promise<void> {
+  async #handlePrompt(chatId: number, state: ChatState, text: string, attachments: readonly PromptContentPart[] = []): Promise<void> {
     const sessionId = state.sessionId
     if (sessionId === undefined) {
       await this.#reply(chatId, '还没有绑定会话。发 /attach（无参数先选工作区/未分组/归档）选择并绑定一个会话。')
       return
     }
-    if (text.trim() === '') return
+    if (text.trim() === '' && attachments.length === 0) return
+    // Images lead the text, the same order the web composer submits them in.
+    const content: PromptContentPart[] = [
+      ...attachments,
+      ...(text.trim() === '' ? [] : [{ type: 'text' as const, text }]),
+    ]
     try {
       if (state.typing) {
-        await this.#port.sendPrompt(sessionId, 'steer', text)
+        await this.#port.sendPrompt(sessionId, 'steer', content)
         return
       }
       // An idle turn queues the prompt: acknowledge with the pending content,
       // so the sender sees what is waiting to run (the agent's reply streams
       // on the turn it opens). A steering interjection needs no ack — it is
       // already part of the running turn's stream.
-      await this.#port.sendPrompt(sessionId, 'queue', text)
-      await this.#reply(chatId, `📥 已加入队列：${truncate(text, QUEUE_ACK_MAX)}`)
+      await this.#port.sendPrompt(sessionId, 'queue', content)
+      const ack = attachments.length === 0
+        ? `📥 已加入队列：${truncate(text, QUEUE_ACK_MAX)}`
+        : text.trim() === ''
+          ? '📥 已加入队列：📎 图片'
+          : `📥 已加入队列：📎 图片 ${truncate(text, QUEUE_ACK_MAX)}`
+      await this.#reply(chatId, ack)
     } catch (error: unknown) {
       await this.#reply(chatId, `⛔ ${error instanceof Error ? error.message : String(error)}`)
     }

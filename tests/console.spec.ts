@@ -6,7 +6,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { SessionId, type SessionEvent } from '@deepseek-ai/dsh-session'
 import { RpcId } from '../src/apiproxy-shim.ts'
-import type { ModelCatalogFailure, ModelProviderGroup, SessionSummary, WorkspaceView } from '../src/apiproxy-shim.ts'
+import type { ModelCatalogFailure, ModelProviderGroup, PromptContentPart, SessionSummary, WorkspaceView } from '../src/apiproxy-shim.ts'
 import type { TokenUsage, UserMessage } from '@deepseek-ai/dsh-llm'
 import { ATTACH_READ_LIMIT, MODEL_KEYBOARD_LIMIT, TURN_ERROR_REASON_MAX, TelegramConsole, interpretInput } from '../src/console.ts'
 import type { ConsoleTransport, SessionConsolePort } from '../src/console.ts'
@@ -51,6 +51,7 @@ class FakePort implements SessionConsolePort {
   sessions: SessionSummary[] = []
   history = new Map<string, SessionEvent[]>()
   promptCalls: { sessionId: string; mode: string; text: string }[] = []
+  promptContents: { sessionId: string; mode: string; content: PromptContentPart[] }[] = []
   stopCalls: string[] = []
   promptError: Error | undefined
   historyError: Error | undefined
@@ -87,9 +88,10 @@ class FakePort implements SessionConsolePort {
     return this.history.get(sessionId) ?? []
   }
 
-  async sendPrompt(sessionId: SessionId, mode: 'queue' | 'steer', text: string): Promise<void> {
+  async sendPrompt(sessionId: SessionId, mode: 'queue' | 'steer', content: readonly PromptContentPart[]): Promise<void> {
     if (this.promptError !== undefined) throw this.promptError
-    this.promptCalls.push({ sessionId, mode, text })
+    this.promptCalls.push({ sessionId, mode, text: content.filter(part => part.type === 'text').map(part => part.text).join('') })
+    this.promptContents.push({ sessionId, mode, content: [...content] })
   }
 
   async stopSession(sessionId: SessionId): Promise<void> {
@@ -480,6 +482,45 @@ describe('prompt forwarding', () => {
     await console.handleMessage(10, '   ')
     await console.handleMessage(10, '\\')
     expect(port.promptCalls).toEqual([])
+    expect(transport.messages).toEqual([])
+  })
+
+  it('carries inbound images ahead of the prompt text and acks with a photo marker', async () => {
+    const { console, port, transport } = setup()
+    await console.handleMessage(10, `/attach ${ID_A}`)
+    transport.messages = []
+    const image: PromptContentPart = { type: 'image', mediaType: 'image/jpeg', data: 'AQID', name: 'photo.jpg' }
+    await console.handleMessage(10, 'что на фото?', [image])
+    expect(port.promptContents).toEqual([{
+      sessionId: ID_A,
+      mode: 'queue',
+      content: [image, { type: 'text', text: 'что на фото?' }],
+    }])
+    expect(transport.messages.map(message => message.text)).toEqual(['📥 已加入队列：📎 图片 что на фото?'])
+  })
+
+  it('forwards an image-only prompt without any text part', async () => {
+    const { console, port, transport } = setup()
+    await console.handleMessage(10, `/attach ${ID_A}`)
+    transport.messages = []
+    const image: PromptContentPart = { type: 'image', mediaType: 'image/png', data: 'AQID' }
+    await console.handleMessage(10, '', [image])
+    expect(port.promptContents).toEqual([{ sessionId: ID_A, mode: 'queue', content: [image] }])
+    expect(transport.messages.map(message => message.text)).toEqual(['📥 已加入队列：📎 图片'])
+  })
+
+  it('steers an inbound image without an acknowledgement while the turn runs', async () => {
+    const { console, port, transport } = setup()
+    await console.handleMessage(10, `/attach ${ID_A}`)
+    await console.onSessionEvent(ID_A, { type: 'turn/start', seq: 0, time: 0, data: { turn: 1 } })
+    transport.messages = []
+    const image: PromptContentPart = { type: 'image', mediaType: 'image/webp', data: 'AQID' }
+    await console.handleMessage(10, 'посмотри', [image])
+    expect(port.promptContents).toEqual([{
+      sessionId: ID_A,
+      mode: 'steer',
+      content: [image, { type: 'text', text: 'посмотри' }],
+    }])
     expect(transport.messages).toEqual([])
   })
 })

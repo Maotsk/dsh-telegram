@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto'
 import type { Context } from '@deepseek-ai/cordis'
 import type { SessionId } from '@deepseek-ai/dsh-session'
 import type {
-  AgentPresetEntry, ApiProxy, ClientResponse, HistoryEntry, ModelCatalogFailure, ModelProviderGroup, RpcId,
+  AgentPresetEntry, ApiProxy, ClientResponse, HistoryEntry, ModelCatalogFailure, ModelProviderGroup, PromptContentPart, RpcId,
   RpcReceipt, RpcResponse, RpcResult, SessionSummary, WorkspaceId, WorkspaceView,
 } from './apiproxy-shim.ts'
 
@@ -86,7 +86,7 @@ interface SessionControllerLike {
     requestId: string
     sessionId: string
     mode: 'queue' | 'steer'
-    content: readonly { type: 'text'; text: string }[]
+    content: readonly PromptContentPart[]
     clientTimeZone?: string
   }, signal: AbortSignal): Promise<{ accepted: true }>
   cancel(request: { sessionId: string }): { accepted: true }
@@ -456,7 +456,9 @@ export function createHostApi(ctx: Context): HostApi {
             requestId: `session-request-${randomUUID()}`,
             sessionId: String(payload.sessionId),
             mode: payload.mode,
-            content: payload.content.filter(part => part.type === 'text') as { type: 'text'; text: string }[],
+            // Text and image parts travel as submitted; the controller promotes
+            // the base64 image bytes into durable attachment references.
+            content: payload.content,
           }, liveSignal())
           return ok(rpcId, { accepted: true as const })
         } catch (error) {

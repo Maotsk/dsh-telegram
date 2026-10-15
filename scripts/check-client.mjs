@@ -128,10 +128,10 @@ if (registered.length === 1) {
   const selects = full.types.filter(type => type === 'select').length
   const saves = full.text.filter(text => text === 'Сохранить').length
   check('full view has three inputs', inputs === 3, `inputs=${inputs}`)
-  check('full view has two selects', selects === 2, `selects=${selects}`)
+  check('full view has three selects', selects === 3, `selects=${selects}`)
   check('full view has one save button', saves === 1, `save=${saves}`)
   const text = full.text.join(' | ')
-  for (const title of ['Токен бота', 'Разрешённые чаты', 'HTTP-прокси', 'Язык интерфейса', 'Нижняя клавиатура']) {
+  for (const title of ['Токен бота', 'Разрешённые чаты', 'HTTP-прокси', 'Язык интерфейса', 'Нижняя клавиатура', 'Фото без подписи']) {
     check(`full view carries the «${title}» label`, text.includes(title))
   }
 }
